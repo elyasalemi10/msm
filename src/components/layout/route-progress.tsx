@@ -6,8 +6,8 @@
 // Two halves of one idea: pages render instantly from the client router cache
 // (see experimental.staleTimes in next.config.ts), then quietly re-fetch
 // themselves in the background so what you're looking at catches up. A page
-// left open re-fetches every 30s. The bar across the top is the only tell
-// that the second half is happening.
+// left open re-fetches every 30s, silently , the bar at the top is only for
+// refreshes the user can trace back to something they just did.
 //
 // The bar is driven by a ref-counted module store rather than context, so any
 // component anywhere can light it up for its own slow work:
@@ -217,7 +217,7 @@ function NavigationWatcher() {
 // content can be a couple of minutes old, so on arrival we re-fetch it in a
 // transition: React keeps the stale page on screen and swaps in the fresh
 // one when it lands. Same on a 30s timer while the page is open, and when
-// the tab regains focus.
+// the tab regains focus. Only the arrival and refocus cases show the bar.
 
 /** Last time each URL was known-fresh, keyed by pathname + query. Module
  *  scope so it survives the component remounting on every navigation. */
@@ -241,6 +241,8 @@ const ARRIVAL_MIN_AGE_MS = 10_000;
  *  minimum age before a refocus is worth a round trip. Polling only runs
  *  while the tab is visible , a backgrounded tab catches up on focus. */
 const REVALIDATE_INTERVAL_MS = 30_000;
+/** Backstop on a refresh that never reports finishing. */
+const REFRESH_FAILSAFE_MS = 15_000;
 
 /** Routes where a background refresh is pointless or unwelcome: multi-step
  *  wizards and long-form editors own their state client-side, and the auth
@@ -252,19 +254,45 @@ function StaleWhileRevalidate() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
+  const inFlightRef = useRef(false);
   const doneRef = useRef<(() => void) | null>(null);
+  const failsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const key = `${pathname}?${searchParams}`;
   const skip = SKIP_REVALIDATE.some((prefix) => pathname.startsWith(prefix));
 
-  const revalidate = useCallback(() => {
-    if (doneRef.current) return; // one in flight is enough
-    doneRef.current = startRouteProgress();
-    markLoaded(key, Date.now());
-    startTransition(() => {
-      router.refresh();
-    });
-  }, [key, router]);
+  const settle = useCallback(() => {
+    inFlightRef.current = false;
+    if (failsafeRef.current) {
+      clearTimeout(failsafeRef.current);
+      failsafeRef.current = null;
+    }
+    doneRef.current?.();
+    doneRef.current = null;
+  }, []);
+
+  /**
+   * Re-fetch the current route. `silent` skips the top bar: the 30s timer
+   * fires while someone is sitting reading the page, and a bar sweeping past
+   * every half minute reads as an alarm rather than an update. Refreshes the
+   * user can attribute to something they just did (landing on a stale page,
+   * coming back to the tab) do show it.
+   */
+  const revalidate = useCallback(
+    (silent = false) => {
+      if (inFlightRef.current) return; // one in flight is enough
+      inFlightRef.current = true;
+      if (!silent) doneRef.current = startRouteProgress();
+      markLoaded(key, Date.now());
+      // If a transition somehow never reports back, don't wedge the in-flight
+      // flag shut and silently stop refreshing for the rest of the session.
+      failsafeRef.current = setTimeout(settle, REFRESH_FAILSAFE_MS);
+      startTransition(() => {
+        router.refresh();
+      });
+    },
+    [key, router, settle],
+  );
 
   // On arrival: anything we've rendered before came from the router cache,
   // so it's stale by definition. A first visit was just fetched , leave it.
@@ -293,7 +321,7 @@ function StaleWhileRevalidate() {
       if (document.visibilityState !== "visible") return;
       const previous = lastLoadedAt.get(key);
       if (previous !== undefined && Date.now() - previous < REVALIDATE_INTERVAL_MS) return;
-      revalidate();
+      revalidate(true); // silent , nobody asked for this one
     }, REVALIDATE_INTERVAL_MS);
     return () => clearInterval(id);
   }, [key, skip, revalidate]);
@@ -318,12 +346,10 @@ function StaleWhileRevalidate() {
   // The transition going idle is how we know the fresh payload has been
   // applied , that's when the bar can complete.
   useEffect(() => {
-    if (!isPending && doneRef.current) {
-      markLoaded(key, Date.now());
-      doneRef.current();
-      doneRef.current = null;
-    }
-  }, [isPending, key]);
+    if (isPending || !inFlightRef.current) return;
+    markLoaded(key, Date.now());
+    settle();
+  }, [isPending, key, settle]);
 
   return null;
 }
