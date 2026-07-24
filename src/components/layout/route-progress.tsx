@@ -5,8 +5,9 @@
 // ----------------------------------------------------------------------------
 // Two halves of one idea: pages render instantly from the client router cache
 // (see experimental.staleTimes in next.config.ts), then quietly re-fetch
-// themselves in the background so what you're looking at catches up. The bar
-// across the top is the only tell that the second half is happening.
+// themselves in the background so what you're looking at catches up. A page
+// left open re-fetches every 30s. The bar across the top is the only tell
+// that the second half is happening.
 //
 // The bar is driven by a ref-counted module store rather than context, so any
 // component anywhere can light it up for its own slow work:
@@ -215,7 +216,8 @@ function NavigationWatcher() {
 // trip, which is what makes navigation feel instant. The trade is that the
 // content can be a couple of minutes old, so on arrival we re-fetch it in a
 // transition: React keeps the stale page on screen and swaps in the fresh
-// one when it lands. Same deal when the tab regains focus.
+// one when it lands. Same on a 30s timer while the page is open, and when
+// the tab regains focus.
 
 /** Last time each URL was known-fresh, keyed by pathname + query. Module
  *  scope so it survives the component remounting on every navigation. */
@@ -235,8 +237,10 @@ function markLoaded(key: string, at: number) {
 
 /** Arriving back within this window means the cached copy is new enough. */
 const ARRIVAL_MIN_AGE_MS = 10_000;
-/** Refocusing a tab left open for longer than this re-fetches it. */
-const FOCUS_MIN_AGE_MS = 30_000;
+/** How often a page open in front of someone re-fetches itself, and the
+ *  minimum age before a refocus is worth a round trip. Polling only runs
+ *  while the tab is visible , a backgrounded tab catches up on focus. */
+const REVALIDATE_INTERVAL_MS = 30_000;
 
 /** Routes where a background refresh is pointless or unwelcome: multi-step
  *  wizards and long-form editors own their state client-side, and the auth
@@ -279,13 +283,28 @@ function StaleWhileRevalidate() {
     revalidate();
   }, [key, skip, revalidate]);
 
+  // While the page sits open in front of someone, keep it current. The
+  // interval restarts on every navigation (revalidate closes over `key`),
+  // so a fresh page gets its full 30s before the first poll.
+  useEffect(() => {
+    if (skip) return;
+    const id = setInterval(() => {
+      // A backgrounded tab isn't being read , don't spend a render on it.
+      if (document.visibilityState !== "visible") return;
+      const previous = lastLoadedAt.get(key);
+      if (previous !== undefined && Date.now() - previous < REVALIDATE_INTERVAL_MS) return;
+      revalidate();
+    }, REVALIDATE_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [key, skip, revalidate]);
+
   // Coming back to a tab that's been sitting open.
   useEffect(() => {
     if (skip) return;
     function onFocus() {
       if (document.visibilityState !== "visible") return;
       const previous = lastLoadedAt.get(key);
-      if (previous !== undefined && Date.now() - previous < FOCUS_MIN_AGE_MS) return;
+      if (previous !== undefined && Date.now() - previous < REVALIDATE_INTERVAL_MS) return;
       revalidate();
     }
     document.addEventListener("visibilitychange", onFocus);
