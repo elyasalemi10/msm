@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist } from "next/font/google";
 import { Toaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { RouteProgress } from "@/components/layout/route-progress";
 import "./globals.css";
 
 const geist = Geist({
@@ -30,6 +31,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={`${geist.variable} font-sans antialiased`}>
+        <RouteProgress />
         <TooltipProvider>
           {children}
         </TooltipProvider>
