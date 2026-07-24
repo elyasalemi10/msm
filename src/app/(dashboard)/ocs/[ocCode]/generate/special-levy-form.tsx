@@ -20,6 +20,7 @@ import {
   Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { createLevyBatch } from "@/lib/actions/levy";
+import { isoToday } from "@/lib/utils";
 import { useOCCode } from "@/lib/oc-context";
 
 interface CoaOption {
@@ -102,6 +103,9 @@ export function SpecialLevyForm({
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
   const [dueDate, setDueDate] = useState("");
+  // Date printed on the notices. Defaults to today; the manager can
+  // back-date or forward-date a levy they're raising after the fact.
+  const [issueDate, setIssueDate] = useState(isoToday);
   // Fund defaults to the first available fund the OC actually has.
   const [fundType, setFundType] = useState<FundType>(availableFunds[0] ?? "operating");
 
@@ -124,6 +128,7 @@ export function SpecialLevyForm({
     periodStart?: boolean;
     periodEnd?: boolean;
     dueDate?: boolean;
+    issueDate?: boolean;
     items?: boolean;
   }>({});
 
@@ -162,6 +167,7 @@ export function SpecialLevyForm({
     if (!periodEnd) { next.periodEnd = true; problems.push("period end"); }
     if (periodStart && periodEnd && periodEnd < periodStart) { next.periodEnd = true; problems.push("period end can't be before period start"); }
     if (!dueDate) { next.dueDate = true; problems.push("due date"); }
+    if (!issueDate) { next.issueDate = true; problems.push("issue date"); }
     const incompleteItems = items.some((i) => {
       const amt = parseFloat(i.amount) || 0;
       const hasCoa = !!i.coa_account_id;
@@ -248,6 +254,13 @@ export function SpecialLevyForm({
 
   async function handleCreate() {
     if (!lots) return;
+    // The manager can clear the issue date after apportioning, so re-check
+    // it here rather than trusting the handleCalculate pass.
+    if (!issueDate) {
+      setInvalid((iv) => ({ ...iv, issueDate: true }));
+      toast.error("Pick an issue date.");
+      return;
+    }
     // Block submit if any per-lot adjustment is incomplete (no CoA OR
     // a $0 amount). A zero-dollar line item is never intended , the
     // manager either didn't finish typing or forgot to pick a category.
@@ -307,6 +320,7 @@ export function SpecialLevyForm({
       period_start: periodStart,
       period_end: periodEnd,
       due_date: dueDate,
+      issue_date: issueDate,
       lots: lotPayloads,
       is_special: true,
       special_purpose: purpose,
@@ -371,6 +385,14 @@ export function SpecialLevyForm({
                   </ComboboxList>
                 </ComboboxContent>
               </Combobox>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Issue date <span className="text-destructive">*</span></Label>
+              <DatePicker
+                value={issueDate}
+                onChange={(v) => { setIssueDate(v); setInvalid((iv) => ({ ...iv, issueDate: false })); }}
+                invalid={invalid.issueDate}
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Due date <span className="text-destructive">*</span></Label>

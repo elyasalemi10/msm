@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronDown, Plus, X, Loader2 } from "lucide-react";
-import { formatDayMonthShort } from "@/lib/utils";
+import { formatDayMonthShort, isoToday } from "@/lib/utils";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
@@ -243,6 +243,10 @@ export function GenerateLeviesForm({
   const [preview, setPreview] = useState<LevyPreviewData | null>(null);
   const [lots, setLots] = useState<AdjustedLot[]>([]);
   const [dueDate, setDueDate] = useState<string>("");
+  // Date printed on the notices. Defaults to today; the manager can
+  // back-date or forward-date a batch they're raising after the fact.
+  const [issueDate, setIssueDate] = useState<string>(isoToday);
+  const [issueDateInvalid, setIssueDateInvalid] = useState(false);
   const [periodStart, setPeriodStart] = useState<string>("");
   const [periodEnd, setPeriodEnd] = useState<string>("");
   const [loading, setLoading] = useState(false);
@@ -341,6 +345,11 @@ export function GenerateLeviesForm({
 
   async function handleGenerate() {
     if (!preview) return;
+    if (!issueDate) {
+      setIssueDateInvalid(true);
+      toast.error("Pick an issue date.");
+      return;
+    }
     setGenerating(true);
 
     const result = await createLevyBatch(ocId, {
@@ -351,6 +360,7 @@ export function GenerateLeviesForm({
       period_start: periodStart || preview.period_start,
       period_end: periodEnd || preview.period_end,
       due_date: dueDate || preview.due_date,
+      issue_date: issueDate,
       lots: lots.map((lot) => {
         const allItems = [
           ...lot.items.map((item) => ({ ...item, is_adjustment: false })),
@@ -513,7 +523,16 @@ export function GenerateLeviesForm({
           )}
 
           {preview && (
-            <div className="grid grid-cols-1 gap-4 pt-2 border-t border-border sm:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 pt-2 border-t border-border sm:grid-cols-2 lg:grid-cols-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Issue date</Label>
+                <DatePicker
+                  value={issueDate}
+                  onChange={(v) => { setIssueDate(v); setIssueDateInvalid(false); }}
+                  disabled={generating}
+                  invalid={issueDateInvalid}
+                />
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground">Period start</Label>
                 <DatePicker value={periodStart} onChange={setPeriodStart} disabled={generating} />

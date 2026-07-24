@@ -759,6 +759,10 @@ export async function createLevyBatch(
     period_start: string;
     period_end: string;
     due_date: string;
+    /** Date printed as "Issue date" on every notice in the batch. The
+     *  manager picks it in the generate flow (back-dating a batch they
+     *  raised earlier is routine); omitted means today. */
+    issue_date?: string | null;
     lots: {
       lot_id: string;
       amount: number;
@@ -793,6 +797,11 @@ export async function createLevyBatch(
 
   const totalAmount = data.lots.reduce((sum, lot) => sum + lot.amount, 0);
 
+  // Issue date the manager picked, falling back to today. Persisted on the
+  // batch AND every notice so a later regeneration reprints the same date
+  // instead of stamping whatever day the PDF happened to be rebuilt.
+  const issueDate = data.issue_date || new Date().toISOString().slice(0, 10);
+
   // Create batch
   const { data: batch, error: batchError } = await supabase
     .from("levy_batches")
@@ -805,6 +814,7 @@ export async function createLevyBatch(
       period_end: data.period_end,
       period_label: data.period_label,
       due_date: data.due_date,
+      issue_date: issueDate,
       total_amount: totalAmount,
       levy_count: data.lots.length,
       status: "draft",
@@ -907,6 +917,7 @@ export async function createLevyBatch(
         period_end: data.period_end,
         amount: lot.amount,
         due_date: data.due_date,
+        issue_date: issueDate,
         status: "draft",
       })
       .select("id")
@@ -988,7 +999,7 @@ export async function createLevyBatch(
         },
         documentTitle: "Levy Notice",
         referenceNumber: levy.refNum,
-        date: new Date(),
+        date: new Date(`${issueDate}T00:00:00`),
         lotOwner: {
           name: ownerInfo?.owner_display_name ?? "Lot Owner",
           lot_number: `${lotInfo?.lot_number ?? ""}${lotInfo?.unit_number ? ` Unit ${lotInfo.unit_number}` : ""}`,
@@ -1035,6 +1046,7 @@ export async function createLevyBatch(
     entity_id: batch.id,
     after_state: {
       period_label: data.period_label,
+      issue_date: issueDate,
       total_amount: totalAmount,
       levy_count: createdLevies.length,
       lots_supplied: data.lots.length,
@@ -1342,6 +1354,16 @@ export async function regenerateBatch(ocId: string, batchId: string, newDueDate:
   await requireOCAccess(ocId);
   const supabase = createServerClient();
 
+  // Read the batch's issue date first , regeneration changes the due date
+  // only. The printed issue date is whatever the manager picked when the
+  // batch was raised, never the day of the rebuild.
+  const { data: existingBatch } = await supabase
+    .from("levy_batches")
+    .select("issue_date")
+    .eq("id", batchId)
+    .single();
+  const issueDate = (existingBatch as { issue_date: string | null } | null)?.issue_date ?? null;
+
   // Update batch due date
   await supabase
     .from("levy_batches")
@@ -1421,7 +1443,7 @@ export async function regenerateBatch(ocId: string, batchId: string, newDueDate:
         },
         documentTitle: "Levy Notice",
         referenceNumber: levy.reference_number,
-        date: new Date(),
+        date: issueDate ? new Date(`${issueDate}T00:00:00`) : new Date(),
         lotOwner: {
           name: owner?.owner_display_name ?? "Lot Owner",
           lot_number: `${lot?.lot_number ?? ""}${lot?.unit_number ? ` Unit ${lot.unit_number}` : ""}`,

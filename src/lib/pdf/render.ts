@@ -120,7 +120,7 @@ async function assembleLevyNoticeProps(
   const { data: levyData, error: levyErr } = await supabase
     .from("levy_notices")
     .select(
-      "id, reference_number, amount, due_date, period_start, period_end, lot_id, oc_id, levy_type, batch_id",
+      "id, reference_number, amount, due_date, issue_date, period_start, period_end, lot_id, oc_id, levy_type, batch_id",
     )
     .eq("id", levyId)
     .single();
@@ -134,6 +134,7 @@ async function assembleLevyNoticeProps(
     reference_number: string;
     amount: number | string;
     due_date: string;
+    issue_date: string | null;
     period_start: string;
     period_end: string;
     lot_id: string;
@@ -368,7 +369,10 @@ async function assembleLevyNoticeProps(
     // owner's permanent reference (DRN / payment_reference) goes into
     // the EFT "Reference" field below where they actually need it.
     referenceNumber: levy.reference_number,
-    date: new Date(),
+    // The issue date the manager picked when the batch was raised. Only
+    // falls back to today for legacy notices written before the field
+    // existed.
+    date: levy.issue_date ? new Date(`${levy.issue_date}T00:00:00`) : new Date(),
     lotOwner: {
       name: ownerName,
       lot_number: lotLabel,

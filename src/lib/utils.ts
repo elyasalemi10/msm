@@ -26,6 +26,17 @@ export function formatDayMonthShort(date: string | Date): string {
   return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
 }
 
+/** Today as YYYY-MM-DD in the viewer's own timezone. Use for default
+ *  values on <DatePicker>, which speaks plain date strings , never
+ *  new Date().toISOString().slice(0,10), which is UTC and lands on the
+ *  wrong day for an Australian user before 10am. */
+export function isoToday(): string {
+  const d = new Date();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 /** Joins two dates with a clean hyphen, no commas: "1 April - 30 June". */
 export function formatDateRangeLong(startISO: string, endISO: string): string {
   return `${formatDateLong(startISO)} - ${formatDateLong(endISO)}`;

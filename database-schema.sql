@@ -660,6 +660,11 @@ CREATE TABLE levy_batches (
   period_end DATE NOT NULL,
   period_label TEXT NOT NULL,                       -- e.g. "Q1 2025-2026"
   due_date DATE NOT NULL,
+  -- Date printed as "Issue date" on every notice in the batch. Picked by
+  -- the manager in the generate flow (defaults to today client-side), so a
+  -- batch raised late can still be dated correctly. NULL only on legacy
+  -- rows written before the column existed, those fall back to render day.
+  issue_date DATE,
   total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
   levy_count INTEGER NOT NULL DEFAULT 0,
   status levy_batch_status NOT NULL DEFAULT 'draft',
@@ -698,6 +703,10 @@ CREATE TABLE levy_notices (
   amount DECIMAL(12,2) NOT NULL,
   amount_paid DECIMAL(12,2) NOT NULL DEFAULT 0,
   due_date DATE NOT NULL,
+  -- Copied from levy_batches.issue_date at creation so a notice can be
+  -- re-rendered on its own (escalation senders, /api/levies/{id}/pdf)
+  -- without joining the batch. NULL = fall back to the render date.
+  issue_date DATE,
   status levy_status NOT NULL DEFAULT 'draft',
   issued_at TIMESTAMPTZ,
   paid_at TIMESTAMPTZ,
