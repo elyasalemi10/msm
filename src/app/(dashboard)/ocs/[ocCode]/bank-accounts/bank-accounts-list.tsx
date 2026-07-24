@@ -2,16 +2,25 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, Plus, Landmark, ChevronLeft, ChevronRight, ReceiptText } from "lucide-react";
+import {
+  Upload, Plus, Landmark, ChevronLeft, ChevronRight, ReceiptText, Trash2,
+  AlertTriangle, Loader2,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/shared/empty-state";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import { AUSTRALIAN_BANKS } from "@/lib/data/australian-banks";
 import { ImportCsvDialog } from "./import-csv-dialog";
 import { AddBankAccountDrawer } from "./add-bank-account-drawer";
+import { deleteBankAccount } from "./actions";
 
 const formatCurrency = (n: number) =>
   new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(n);
@@ -85,6 +94,8 @@ export function BankAccountsList({
   const [importTarget, setImportTarget] = useState<BankAccountRow | null>(null);
   const [activeTab, setActiveTab] = useState<string>(accounts[0]?.id ?? "");
   const [addOpen, setAddOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<BankAccountRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   function switchTab(next: string) {
     setActiveTab(next);
@@ -93,6 +104,25 @@ export function BankAccountsList({
       url.searchParams.set("tab", next);
       window.history.replaceState(null, "", url.toString());
     }
+  }
+
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    const res = await deleteBankAccount(ocId, deleteTarget.id);
+    if (res.error) {
+      setDeleting(false);
+      toast.error(res.error);
+      return;
+    }
+    // Move to the account that just became primary BEFORE the refresh, so
+    // the tab strip never points at the row that's about to disappear.
+    const promoted = res.promotedAccountId ?? accounts.find((a) => a.id !== deleteTarget.id)?.id ?? "";
+    switchTab(promoted);
+    setDeleteTarget(null);
+    setDeleting(false);
+    toast.success("Bank account deleted");
+    router.refresh();
   }
 
   return (
@@ -134,10 +164,43 @@ export function BankAccountsList({
 
         {accounts.map((a) => (
           <TabsContent key={a.id} value={a.id} className="mt-4">
-            <AccountPane account={a} onImport={() => setImportTarget(a)} />
+            <AccountPane
+              account={a}
+              onImport={() => setImportTarget(a)}
+              // An OC must keep one account , levies have to name somewhere
+              // to be paid. With only one left there's nothing to delete to.
+              onDelete={accounts.length > 1 ? () => setDeleteTarget(a) : undefined}
+            />
           </TabsContent>
         ))}
       </Tabs>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => { if (!o && !deleting) setDeleteTarget(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 text-destructive" />
+              Delete this bank account?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget?.account_name || "This account"} and every transaction
+              imported into it will be removed. The remaining account becomes the
+              Owners Corporation&apos;s primary operating account and will be shown
+              on new levy notices. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} disabled={deleting}>
+              {deleting && <Loader2 className="size-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {importTarget && (
         <ImportCsvDialog
@@ -169,9 +232,12 @@ export function BankAccountsList({
 function AccountPane({
   account,
   onImport,
+  onDelete,
 }: {
   account: BankAccountRow;
   onImport: () => void;
+  /** Omitted when this is the OC's last account , nothing to fall back to. */
+  onDelete?: () => void;
 }) {
   // Available month keys derived from the imported transactions, newest first.
   const availableMonths = useMemo(() => {
@@ -200,7 +266,17 @@ function AccountPane({
 
   return (
     <div className="rounded-md border border-border bg-card p-5 space-y-5">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        {onDelete && (
+          <Button
+            variant="secondary"
+            onClick={onDelete}
+            className="text-destructive hover:bg-destructive/5"
+          >
+            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+            Delete account
+          </Button>
+        )}
         <Button onClick={onImport}>
           <Upload className="mr-1.5 h-3.5 w-3.5" />
           Import CSV

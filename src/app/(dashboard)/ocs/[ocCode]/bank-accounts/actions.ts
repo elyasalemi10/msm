@@ -171,3 +171,183 @@ export async function createBankAccount(
   revalidatePath("/ocs/[ocCode]/bank-accounts", "page");
   return { id: row.id };
 }
+
+/**
+ * Delete a physical bank account. Allowed only while the OC keeps at least
+ * one other physical account , an OC with no account has nowhere to receive
+ * levies. The surviving account is promoted to the primary operating one
+ * (fund_type='operating'), which is what the levy notice EFT block and the
+ * account tab order both key off, and it adopts any fund the deleted
+ * account was linked to so no fund is left without an account.
+ *
+ * Imported statement lines go with the account (FK cascade). Accounts with
+ * fund transfers or banked receipts against them are refused , those are
+ * posted financial records, not a re-importable statement.
+ */
+export async function deleteBankAccount(
+  ocId: string,
+  accountId: string,
+): Promise<{ promotedAccountId?: string; error?: string }> {
+  const profile = await requireCompanyRole();
+  await requireOCAccess(ocId);
+  const supabase = createServerClient();
+
+  const { data: accounts } = await supabase
+    .from("bank_accounts")
+    .select("id, account_name, bsb, account_number, bank_name, fund_type, fund_id, parent_account_id, created_at")
+    .eq("oc_id", ocId);
+
+  type Row = {
+    id: string;
+    account_name: string | null;
+    bsb: string | null;
+    account_number: string | null;
+    bank_name: string | null;
+    fund_type: string;
+    fund_id: string | null;
+    parent_account_id: string | null;
+    created_at: string;
+  };
+  const all = (accounts ?? []) as Row[];
+  const target = all.find((a) => a.id === accountId);
+  if (!target) return { error: "Bank account not found." };
+  if (target.parent_account_id) {
+    return { error: "This is a fund's link to a shared account. Remove it from the funds page." };
+  }
+
+  const physical = all.filter((a) => !a.parent_account_id);
+  if (physical.length <= 1) {
+    return { error: "This is the only bank account for this Owners Corporation. Add another one before deleting it." };
+  }
+
+  // The account plus every fund-link row hanging off it.
+  const children = all.filter((a) => a.parent_account_id === accountId);
+  const doomedIds = [accountId, ...children.map((c) => c.id)];
+
+  const [transfers, receipts] = await Promise.all([
+    supabase
+      .from("fund_transfers")
+      .select("id", { count: "exact", head: true })
+      .or(
+        `from_bank_account_id.in.(${doomedIds.join(",")}),to_bank_account_id.in.(${doomedIds.join(",")})`,
+      ),
+    supabase
+      .from("undeposited_funds_entries")
+      .select("id", { count: "exact", head: true })
+      .in("bank_account_id", doomedIds),
+  ]);
+  if (transfers.count) {
+    return { error: "This account has fund transfers recorded against it, so it can't be deleted." };
+  }
+  if (receipts.count) {
+    return { error: "This account has receipts banked to it, so it can't be deleted." };
+  }
+
+  // Successor: an account already flagged operating if there is one,
+  // otherwise the oldest survivor. Deterministic either way, so the tab
+  // order after the delete matches what the manager was told.
+  const remaining = physical
+    .filter((a) => a.id !== accountId)
+    .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
+  const successor = remaining.find((a) => a.fund_type === "operating") ?? remaining[0];
+
+  // Funds that lose their account when this one goes. Re-point them at the
+  // successor: straight onto it while it has no fund of its own, otherwise
+  // as a shared-account child row (the same shape the funds page creates).
+  const stillLinkedFundIds = new Set(
+    all
+      .filter((a) => !doomedIds.includes(a.id))
+      .map((a) => a.fund_id)
+      .filter((id): id is string => !!id),
+  );
+  const orphanedFundIds = [target.fund_id, ...children.map((c) => c.fund_id)]
+    .filter((id): id is string => !!id)
+    .filter((id) => !stillLinkedFundIds.has(id));
+
+  let successorFundId = successor.fund_id;
+  const childInserts: Array<{
+    oc_id: string;
+    fund_id: string;
+    fund_type: string;
+    parent_account_id: string;
+    account_name: string;
+  }> = [];
+  for (const fundId of orphanedFundIds) {
+    if (!successorFundId) {
+      successorFundId = fundId;
+      continue;
+    }
+    const { data: fund } = await supabase
+      .from("funds")
+      .select("name, kind")
+      .eq("id", fundId)
+      .maybeSingle();
+    const f = fund as { name: string; kind: string } | null;
+    childInserts.push({
+      oc_id: ocId,
+      fund_id: fundId,
+      fund_type: f?.kind === "maintenance_plan" ? "maintenance_plan" : "operating",
+      parent_account_id: successor.id,
+      account_name: f?.name ?? successor.account_name ?? "Bank account",
+    });
+  }
+
+  // Children first , they point at the row we're about to remove.
+  if (children.length > 0) {
+    const { error: childErr } = await supabase
+      .from("bank_accounts")
+      .delete()
+      .in("id", children.map((c) => c.id));
+    if (childErr) return { error: "Could not delete this bank account." };
+  }
+  const { error: delErr } = await supabase
+    .from("bank_accounts")
+    .delete()
+    .eq("id", accountId)
+    .eq("oc_id", ocId);
+  if (delErr) {
+    console.error("deleteBankAccount: delete failed", delErr);
+    return { error: "Could not delete this bank account." };
+  }
+
+  // Promote the survivor. fund_type is the legacy flag the levy EFT lookup
+  // and the tab sort still read, so the OC always has one account marked
+  // operating.
+  const { error: promoteErr } = await supabase
+    .from("bank_accounts")
+    .update({ fund_type: "operating", fund_id: successorFundId })
+    .eq("id", successor.id);
+  if (promoteErr) console.error("deleteBankAccount: promote failed", promoteErr);
+
+  if (childInserts.length > 0) {
+    const { error: reparentErr } = await supabase.from("bank_accounts").insert(childInserts);
+    if (reparentErr) console.error("deleteBankAccount: fund re-link failed", reparentErr);
+  }
+
+  await supabase.from("audit_log").insert({
+    profile_id: profile.id,
+    oc_id: ocId,
+    action: "delete",
+    entity_type: "bank_account",
+    entity_id: accountId,
+    before_state: {
+      account_name: target.account_name,
+      bsb: target.bsb,
+      account_number: target.account_number,
+      bank_name: target.bank_name,
+      fund_type: target.fund_type,
+      fund_id: target.fund_id,
+      linked_fund_rows: children.length,
+    },
+    after_state: {
+      promoted_account_id: successor.id,
+      promoted_account_name: successor.account_name,
+      funds_relinked: orphanedFundIds.length,
+    },
+  });
+
+  revalidatePath("/ocs/[ocCode]/bank-accounts", "page");
+  revalidatePath("/ocs/[ocCode]/funds", "page");
+  revalidatePath("/ocs/[ocCode]/reconciliation", "page");
+  return { promotedAccountId: successor.id };
+}
