@@ -125,7 +125,7 @@ function bucketForKey(key: string): string {
 // bare custom domain ("cdn.stratawise.com.au") , without normalising, the
 // stored URLs come out scheme-less and the browser treats them as relative
 // paths (a scheme-less <audio>/<img> src 404s). Force https:// when missing.
-function publicBase(): string {
+export function publicBase(): string {
   const raw = (process.env.R2_PUBLIC_URL ?? "").trim().replace(/\/$/, "");
   if (!raw) return "";
   return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;

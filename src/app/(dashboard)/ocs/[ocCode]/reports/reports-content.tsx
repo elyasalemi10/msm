@@ -151,14 +151,18 @@ export function ReportsContent({
     if (!logoUrl) return null;
     try {
       const res = await fetch(`/api/proxy-image?url=${encodeURIComponent(logoUrl)}`);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.error(`Logo proxy failed (${res.status}) for ${logoUrl}`);
+        return null;
+      }
       const blob = await res.blob();
       return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => resolve(reader.result as string);
         reader.readAsDataURL(blob);
       });
-    } catch {
+    } catch (err) {
+      console.error("Logo proxy failed", err);
       return null;
     }
   }
@@ -239,8 +243,12 @@ export function ReportsContent({
               if (sigRes.ok) {
                 const sigBlob = await sigRes.blob();
                 certSig = await new Promise((r) => { const rd = new FileReader(); rd.onloadend = () => r(rd.result as string); rd.readAsDataURL(sigBlob); });
+              } else {
+                console.error(`Signature proxy failed (${sigRes.status}) for ${certData.signatureUrl}`);
               }
-            } catch { /* ignore */ }
+            } catch (err) {
+              console.error("Signature proxy failed", err);
+            }
           }
           element = createElement(OCCertificate, { ...certData, logoUrl: certLogo, signatureUrl: certSig });
           break;

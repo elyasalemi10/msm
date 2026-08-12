@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUserId } from "@/lib/auth";
+import { publicBase } from "@/lib/storage/r2";
 const ALLOWED_CONTENT_TYPES = ["image/png", "image/jpeg", "image/webp", "image/svg+xml", "image/gif"];
+
+// R2_PUBLIC_URL may be configured as a bare custom domain
+// ("cdn.stratawise.com.au"), and rows written before publicBase() landed can
+// hold scheme-less URLs too. Force https:// on both sides before parsing,
+// otherwise new URL() throws and the proxy 500s on every image.
+function withScheme(value: string): string {
+  const raw = value.trim();
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+}
 
 export async function GET(request: NextRequest) {
   const userId = await getAuthUserId();
@@ -8,8 +18,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const r2Domain = process.env.R2_PUBLIC_URL;
+  // publicBase() already normalises the scheme and strips a trailing slash.
+  const r2Domain = publicBase();
   if (!r2Domain) {
+    console.error("proxy-image: R2_PUBLIC_URL is not set");
     return NextResponse.json({ error: "Image proxy not configured" }, { status: 500 });
   }
 
@@ -18,7 +30,7 @@ export async function GET(request: NextRequest) {
 
   let parsed: URL;
   try {
-    parsed = new URL(url);
+    parsed = new URL(withScheme(url));
   } catch {
     return NextResponse.json({ error: "Invalid URL" }, { status: 400 });
   }
@@ -27,6 +39,7 @@ export async function GET(request: NextRequest) {
   try {
     allowed = new URL(r2Domain);
   } catch {
+    console.error(`proxy-image: R2_PUBLIC_URL is not a usable host: ${r2Domain}`);
     return NextResponse.json({ error: "Image proxy not configured" }, { status: 500 });
   }
 
