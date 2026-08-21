@@ -25,9 +25,28 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 let activeCount = 0;
 const listeners = new Set<() => void>();
+let notifyQueued = false;
 
+// Subscriber notification is deferred to a microtask, deliberately.
+//
+// Next's App Router calls history.pushState from inside a
+// useInsertionEffect. Our patched pushState (see NavigationWatcher) runs
+// startRouteProgress synchronously, so notifying useSyncExternalStore from
+// there schedules a React update during the insertion-effect phase, which
+// React rejects outright: "useInsertionEffect must not schedule updates."
+//
+// The counter itself still moves synchronously, so getSnapshot is correct
+// the instant startRouteProgress returns and there's no tearing. Only the
+// re-render is pushed past the end of the current commit. Coalescing on
+// notifyQueued also collapses the start/finish pairs that a fast navigation
+// fires back to back into a single render.
 function emit() {
-  for (const listener of listeners) listener();
+  if (notifyQueued) return;
+  notifyQueued = true;
+  queueMicrotask(() => {
+    notifyQueued = false;
+    for (const listener of listeners) listener();
+  });
 }
 
 /**
