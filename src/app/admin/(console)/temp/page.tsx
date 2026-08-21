@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { requireRole } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { evaluateSuperAdminGate } from "@/lib/admin-auth";
 import { EnvDump, type EnvEntry } from "./env-dump";
 
 // ============================================================================
@@ -11,9 +12,13 @@ import { EnvDump, type EnvEntry } from "./env-dump";
 // only place those values can still be read, which is what this page is for.
 //
 // DELETE THIS ROUTE once the values are back in .env.local, and rotate every
-// credential it displayed. It is gated on super_admin, but a page that prints
-// the service-role key and the TFN encryption key should not outlive the
-// recovery it was built for.
+// credential it displayed. It sits behind evaluateSuperAdminGate (super_admin
+// role + verified TOTP at AAL2), but a page that prints the service-role key
+// and the TFN encryption key should not outlive the recovery it was built for.
+//
+// It lives under /admin, not /(dashboard): getOnboardingRedirect() sends every
+// super_admin to /admin, so the dashboard route group is unreachable for
+// exactly the role this page is for.
 // ============================================================================
 
 export const dynamic = "force-dynamic";
@@ -73,7 +78,8 @@ const KEYS = [
 ] as const;
 
 export default async function TempEnvPage() {
-  await requireRole(["super_admin"]);
+  const gate = await evaluateSuperAdminGate();
+  if (gate.kind === "redirect") redirect(gate.to);
 
   const entries: EnvEntry[] = KEYS.map((key) => {
     const raw = process.env[key];
@@ -81,7 +87,7 @@ export default async function TempEnvPage() {
   });
 
   return (
-    <div className="space-y-6 px-4 py-4 md:px-6 md:py-6">
+    <div className="space-y-6">
       <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
         <h1 className="text-base font-semibold text-destructive">
           Temporary recovery page
