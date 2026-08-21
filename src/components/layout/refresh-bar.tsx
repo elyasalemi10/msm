@@ -161,6 +161,11 @@ function StaleWhileRevalidate() {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const inFlightRef = useRef(false);
+  // Whether this refresh has actually been observed pending yet. Without
+  // it the settle effect below runs in the SAME commit as the arrival
+  // effect, while isPending is still the false from the previous render,
+  // and stops the bar before it has ever been painted.
+  const sawPendingRef = useRef(false);
   const doneRef = useRef<(() => void) | null>(null);
   const failsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -169,6 +174,7 @@ function StaleWhileRevalidate() {
 
   const settle = useCallback(() => {
     inFlightRef.current = false;
+    sawPendingRef.current = false;
     if (failsafeRef.current) {
       clearTimeout(failsafeRef.current);
       failsafeRef.current = null;
@@ -253,9 +259,18 @@ function StaleWhileRevalidate() {
   }, [key, skip, revalidate]);
 
   // The transition going idle is how we know the fresh payload has been
-  // applied , that's when the bar can stop.
+  // applied , that's when the bar can stop. It has to have gone BUSY first:
+  // this effect and the arrival effect above run in the same commit, and at
+  // that point isPending is still the false from the render that produced
+  // the commit. Settling on that would switch the bar off in the same tick
+  // it was switched on, and since emit coalesces notifications into one
+  // microtask the net change is zero and the bar never paints.
   useEffect(() => {
-    if (isPending || !inFlightRef.current) return;
+    if (isPending) {
+      sawPendingRef.current = true;
+      return;
+    }
+    if (!sawPendingRef.current || !inFlightRef.current) return;
     markLoaded(key, Date.now());
     settle();
   }, [isPending, key, settle]);
