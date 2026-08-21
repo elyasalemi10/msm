@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -38,8 +39,8 @@ export default function SettingsLoading() {
             <Skeleton className="h-9 w-full rounded-md" />
           </div>
 
-          {/* Save button */}
-          <Skeleton className="h-9 w-28 rounded-md" />
+          {/* Fixed action , render it rather than shimmer a grey pill. */}
+          <Button disabled>Save changes</Button>
         </CardContent>
       </Card>
     </div>

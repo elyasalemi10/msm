@@ -1,4 +1,5 @@
-import { Building2, DollarSign, Users } from "lucide-react";
+import { Building2, DollarSign, Plus, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -34,10 +35,13 @@ export default function DashboardLoading() {
         <KPICardSkeleton label="Outstanding" icon={<DollarSign className="h-5 w-5" />} />
       </div>
 
-      {/* OCs section header */}
+      {/* Section heading and its action are both fixed , render them. */}
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold text-foreground">OCs</h2>
-        <Skeleton className="h-8 w-40 rounded-md" />
+        <Button size="sm" disabled>
+          <Plus className="mr-2 h-4 w-4" />
+          Create OC
+        </Button>
       </div>
 
       {/* OC cards skeleton */}

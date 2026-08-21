@@ -1,13 +1,18 @@
+import { Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 
 export default function OCsLoading() {
   return (
     <div className="space-y-6">
-      {/* Header bar */}
+      {/* The count is server data so it shimmers; the action is fixed. */}
       <div className="flex items-center justify-between">
         <Skeleton className="h-4 w-36" />
-        <Skeleton className="h-9 w-44 rounded-md" />
+        <Button disabled>
+          <Plus className="mr-2 h-4 w-4" />
+          Create OC
+        </Button>
       </div>
 
       {/* OC cards , same structure as loaded page */}
