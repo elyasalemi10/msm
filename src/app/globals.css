@@ -287,14 +287,21 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* Skeleton shimmer animation */
-  @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-    100% {
-      background-position: 200% 0;
-    }
+  /* Loading skeletons: a grey block with a light sweep travelling across it,
+     so a page that does not yet know what it is showing reads as "loading"
+     rather than "flashing".
+
+     The sweep moves the background POSITION, not the element. No transform,
+     no compositor layer per skeleton, so sixty of them on a page stay cheap.
+
+     Note --muted here is a full colour (hsl(220, 14%, 88%)), not the bare
+     "H S% L%" channel triple the shadcn convention assumes, so the gradient
+     uses var(--muted) directly. Wrapping it in hsl() would produce
+     hsl(hsl(...)), which is invalid, and the gradient would silently
+     collapse to nothing. */
+  @keyframes skeleton-shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
   }
   /* Welcome overlay animations — used by WelcomeConfetti on ?welcome=1.
      Enter: slide up + fade in. Exit: fade out + drift up. */
@@ -325,15 +332,31 @@
     animation: welcome-out 600ms cubic-bezier(0.4, 0, 0.6, 1) both;
   }
 
-  .animate-shimmer {
-    background: linear-gradient(
+  /* The highlight is 30% of the gradient's width with soft edges at 65%
+     white. Narrower or harder reads as a glare rather than a sheen. */
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+    background-image: linear-gradient(
       90deg,
-      hsl(220, 14%, 96%) 0%,
-      hsl(220, 14%, 93%) 50%,
-      hsl(220, 14%, 96%) 100%
+      var(--muted) 0%,
+      var(--muted) 35%,
+      hsl(0 0% 100% / 0.65) 50%,
+      var(--muted) 65%,
+      var(--muted) 100%
     );
     background-size: 200% 100%;
-    animation: shimmer 1.5s ease-in-out infinite;
+    animation: skeleton-shimmer 1.4s linear infinite;
+  }
+
+  /* Drop the gradient entirely, not just the animation. A frozen gradient
+     is a skeleton with a permanent stripe across it, which reads as a
+     rendering bug. bg-muted on the component is the fallback. */
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton-shimmer {
+      animation: none;
+      background-image: none;
+    }
   }
 }
 

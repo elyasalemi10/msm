@@ -11,6 +11,11 @@ import { cn } from "@/lib/utils";
 //
 // Initial state must be `false` so the server-rendered HTML matches the
 // pre-effect client render , no hydration mismatch.
+//
+// The look is a sweep, not a pulse: a pulsing opacity reads as "something
+// is broken and flashing", a highlight travelling left to right reads as
+// loading. See .skeleton-shimmer in globals.css. bg-muted underneath is
+// what shows when prefers-reduced-motion drops the gradient.
 const SKELETON_DELAY_MS = 200;
 
 function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
@@ -26,7 +31,7 @@ function Skeleton({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="skeleton"
-      className={cn("animate-pulse rounded-md bg-border/60", className)}
+      className={cn("skeleton-shimmer rounded-md bg-muted", className)}
       {...props}
     />
   );
