@@ -11,11 +11,10 @@ import { sendVerificationCode, verifyEmailCode } from "@/lib/actions/email-verif
 import { getSupabaseClient } from "@/lib/supabase";
 
 // Gmail web client deep-link that pre-filters to our sender so the user
-// finds the code instantly. The sender domain is configurable via
-// NEXT_PUBLIC_SENDER_DOMAIN so you can switch off myocm.com.au without
-// touching code. Falls back to myocm.com.au.
+// finds the code instantly. This is the browser-side twin of RESEND_SUFFIX,
+// which isn't NEXT_PUBLIC_ and so can't be read from a client component.
 const SENDER_DOMAIN =
-  process.env.NEXT_PUBLIC_SENDER_DOMAIN ?? "myocm.com.au";
+  process.env.NEXT_PUBLIC_SENDER_DOMAIN ?? "stratawise.com.au";
 const GMAIL_SEARCH_URL = `https://mail.google.com/mail/u/0/#search/from%3A%40${encodeURIComponent(SENDER_DOMAIN)}`;
 
 function VerifyEmailContent() {
