@@ -141,8 +141,6 @@ function markLoaded(key: string, at: number) {
   }
 }
 
-/** Arriving back within this window means the cached copy is new enough. */
-const ARRIVAL_MIN_AGE_MS = 10_000;
 /** How often a page open in front of someone re-fetches itself, and the
  *  minimum age before a refocus is worth a round trip. Polling only runs
  *  while the tab is visible , a backgrounded tab catches up on focus. */
@@ -207,20 +205,22 @@ function StaleWhileRevalidate() {
     [key, router, settle],
   );
 
-  // Arrival. A URL we've rendered before came out of the router cache, so
-  // it's stale by definition and this is the one fetch that gets the bar.
-  // A first visit was just fetched from the server , nothing to caveat, and
-  // loading.tsx already showed skeletons for it.
+  // Arrival.
+  //
+  // First time this URL has been seen this session: there is no cache, so
+  // there is nothing on screen to caveat and no bar. loading.tsx already
+  // covered it with skeletons.
+  //
+  // Every RETURN to a URL seen before: the router cache paints the previous
+  // data instantly, and this fetch checks whether it is still correct. That
+  // is the whole job of the bar, so it runs on every return with no age
+  // threshold , "I have been here before" is the entire condition. If the
+  // data comes back identical, nothing on screen changes and the bar just
+  // stops, which is the correct outcome, not a wasted trip.
   useEffect(() => {
     if (skip) return;
-    const previous = lastLoadedAt.get(key);
-    const now = Date.now();
-    if (previous === undefined) {
-      markLoaded(key, now); // first visit: no cache, no bar
-      return;
-    }
-    if (now - previous < ARRIVAL_MIN_AGE_MS) {
-      markLoaded(key, now); // came straight back: cached copy is fine
+    if (!lastLoadedAt.has(key)) {
+      markLoaded(key, Date.now()); // first visit: no cache, no bar
       return;
     }
     revalidate(true);
