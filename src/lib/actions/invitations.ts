@@ -71,7 +71,8 @@ export async function inviteStrataManager(data: { email: string; name: string })
   });
 
   // Send invitation email
-  const baseUrl = process.env.APP_URL ?? "http://localhost:3002";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "") || "http://localhost:3002";
   const inviteUrl = `${baseUrl}/invite/${invitation.code}`;
   const companyLogoUrl = await resolveCompanyLogo(supabase, {
     managementCompanyId: profile.management_company_id,

@@ -209,7 +209,8 @@ export async function inviteLotOwner(
     .eq("id", lotId)
     .single();
 
-  const baseUrl = process.env.APP_URL ?? "http://localhost:3002";
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "") || "http://localhost:3002";
   const inviteUrl = `${baseUrl}/invite/${invitation.code}`;
   const companyLogoUrl = await resolveCompanyLogo(supabase, {
     ocId,

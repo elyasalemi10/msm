@@ -31,7 +31,6 @@ const NEEDED = [
   "GMAIL_PUBSUB_TOPIC",
   "RESEND_API_KEY",
   "NEXT_PUBLIC_APP_URL",
-  "APP_URL",
 ];
 
 const pat = process.env.TRIGGER_ACCESS_TOKEN;
