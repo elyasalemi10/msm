@@ -158,11 +158,10 @@ function buildClient(): GoogleGenAI {
     } catch {
       throw new Error("Automatic settlement parsing is temporarily unavailable.");
     }
-    const location = process.env.GEMINI_LOCATION?.trim() || "global";
     return new GoogleGenAI({
       vertexai: true,
       project: credentials.project_id,
-      location,
+      location: "global",
       googleAuthOptions: { credentials },
     });
   }

@@ -7,7 +7,6 @@
  *   - emitClaimMatchedEmail (dry-run, opt-out)
  *   - emitClaimRejectedEmail (dry-run, opt-out, rejection_reason in body_preview)
  *
- * EMAIL_DRY_RUN is forced on for the duration of the suite , no real
  * emails fire. Assertions read communication_log, audit_log, and the
  * payment_received_email_sent_at sentinel column directly.
  *
@@ -22,7 +21,6 @@ config({ path: ".env.local" });
 
 // Force dry-run for the whole suite. Set BEFORE importing email.ts so the
 // module-level isDryRun() reads the override.
-process.env.EMAIL_DRY_RUN = "true";
 
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "crypto";

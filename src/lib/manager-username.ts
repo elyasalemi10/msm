@@ -5,7 +5,7 @@
 // src/lib/manager-username-server.ts and DO carry "server-only".
 //
 // Outbound manager email is sent from `<email_username>@<brand-domain>`. The
-// brand domain comes from MANAGER_EMAIL_DOMAIN (or NEXT_PUBLIC_BRAND_DOMAIN).
+// brand domain comes from RESEND_SUFFIX.
 // The username is auto-derived at first onboarding from first_name + last_name.
 // Managers can rename in /settings, but only once per 30 days. Every rename
 // writes the old username to profile_username_aliases so legacy inbound mail
@@ -70,12 +70,19 @@ export function isWithinCooldown(lastChangedAt: Date | string | null | undefined
 }
 
 export function brandDomain(): string {
-  return (
-    process.env.RESEND_SUFFIX ??
-    process.env.MANAGER_EMAIL_DOMAIN ??
-    process.env.NEXT_PUBLIC_BRAND_DOMAIN ??
-    "stratawise.com.au"
-  );
+  return process.env.RESEND_SUFFIX?.trim() || "stratawise.com.au";
+}
+
+// RFC 5322 display names containing specials (comma, dot, angle brackets,
+// quotes) must be quoted or the header is malformed and clients render the
+// raw address instead of the name. Firm names like "Acme Strata Pty. Ltd."
+// hit this, so every FROM header we build goes through here.
+export function formatFrom(displayName: string, address: string): string {
+  const name = displayName.trim();
+  if (!name) return address;
+  return /[()<>[\]:;@\\,."]/.test(name)
+    ? `"${name.replace(/([\\"])/g, "\\$1")}" <${address}>`
+    : `${name} <${address}>`;
 }
 
 // Composes the public-facing address. Always lowercase. If username is missing
@@ -98,10 +105,7 @@ export function managerEmailFrom(
   const addr = managerEmailAddress(username);
   if (!addr) return null;
   const person = personName?.trim() || "";
-  const company =
-    companyName?.trim() ||
-    process.env.NEXT_PUBLIC_BRAND_NAME ||
-    "StrataWise";
+  const company = companyName?.trim() || "StrataWise";
   const display = person ? `${person} - ${company}` : company;
-  return `${display} <${addr}>`;
+  return formatFrom(display, addr);
 }

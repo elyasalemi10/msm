@@ -292,7 +292,7 @@ export async function replyToInboxEmail(
       subject: replySubject,
       body_preview: parsed.data.body.slice(0, 200),
       body_full: parsed.data.body,
-      status: "dryRun" in result ? "queued" : "sent",
+      status: "sent",
       external_id: externalId,
       sent_at: new Date().toISOString(),
       related_entity_type: "communication_log",

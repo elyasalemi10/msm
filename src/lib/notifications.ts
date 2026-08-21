@@ -319,22 +319,8 @@ export async function emitPaymentReceivedEmail(
   }
   const communicationLogId = (logRow as { id: string }).id;
 
-  // Step 7: send via Resend (respects EMAIL_DRY_RUN inside the sender).
+  // Step 7: send via Resend.
   const sendResult = await sendPaymentReceivedEmail(params);
-
-  if ("dryRun" in sendResult) {
-    // Dry-run: don't stamp sentinel, don't transition log to sent. Stays
-    // 'queued' so re-runs in real-send mode can pick up. Audit the dry-run.
-    await supabase.from("audit_log").insert({
-      profile_id: performedBy,
-      oc_id: cr.oc_id,
-      action: "communication.payment_received.dry_run",
-      entity_type: "bank_transaction",
-      entity_id: tx.id,
-      metadata: { ledger_credit_id: ledgerCreditId, communication_log_id: communicationLogId },
-    });
-    return { skipped: true, reason: "dry_run" };
-  }
 
   if ("error" in sendResult) {
     await supabase
@@ -782,7 +768,6 @@ interface PersistSenderResultArgs {
   communicationLogId: string;
   result:
     | { success: true; id: string | null }
-    | { dryRun: true }
     | { error: string };
   auditAction: string;
   auditEntityType: string;
@@ -797,18 +782,6 @@ async function persistSenderResult(
   args: PersistSenderResultArgs,
 ): Promise<void> {
   const { communicationLogId, result, auditAction, auditEntityType, auditEntityId, ocId, performedBy, metadata } = args;
-
-  if ("dryRun" in result) {
-    await supabase.from("audit_log").insert({
-      profile_id: performedBy,
-      oc_id: ocId,
-      action: `${auditAction}.dry_run`,
-      entity_type: auditEntityType,
-      entity_id: auditEntityId,
-      metadata: { ...metadata, communication_log_id: communicationLogId },
-    });
-    return;
-  }
 
   if ("error" in result) {
     await supabase

@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 import { createServerClient } from "@/lib/supabase";
-import { managerEmailFrom, brandDomain } from "@/lib/manager-username";
+import { managerEmailFrom, brandDomain, formatFrom } from "@/lib/manager-username";
 import { sendViaGmail, isGmailConfigured } from "@/lib/google/gmail-client";
 
 function getResend() {
@@ -8,16 +8,72 @@ function getResend() {
 }
 
 // Brand + sender configuration. The brand domain (e.g. "stratawise.com.au") is
-// pulled from RESEND_SUFFIX via brandDomain(). Brand display name is
-// NEXT_PUBLIC_BRAND_NAME (defaults to "StrataWise"). Every manager-initiated
+// pulled from RESEND_SUFFIX via brandDomain(). Every manager-initiated
 // send (invites, levies, overdue chase, payment receipts, claim updates,
 // communications tab messages) resolves a FROM header of the form
 // "Manager Name - Company <username@brand-domain>" via resolveManagerFromHeader
 // or resolveOcSenderFromHeader. Only true system mail (email verification,
-// password reset) stays on the noreply identity below.
-const BRAND_NAME = process.env.NEXT_PUBLIC_BRAND_NAME ?? "StrataWise";
-function noreplyFrom(): string {
-  return `${BRAND_NAME} <noreply@${brandDomain()}>`;
+// password reset) stays on our own identity below.
+
+// Our own identity. Only for mail the PLATFORM sends on its own behalf
+// (email verification, password reset, system notices). Mail sent on behalf
+// of a management firm must carry THEIR name , see orgNoreplyFrom.
+function systemFrom(): string {
+  return formatFrom("StrataWise", `noreply@${brandDomain()}`);
+}
+
+// Noreply identity for a management firm. Used when we're sending on the
+// firm's behalf but can't resolve an individual manager's mailbox, so the
+// owner still sees who the mail is actually from rather than "StrataWise".
+function orgNoreplyFrom(companyName: string | null | undefined): string {
+  const name = companyName?.trim();
+  return name ? formatFrom(name, `noreply@${brandDomain()}`) : systemFrom();
+}
+
+// Trading name wins over legal name , it's what owners recognise.
+async function companyDisplayName(companyId: string): Promise<string | null> {
+  const supabase = createServerClient();
+  const { data } = await supabase
+    .from("management_companies")
+    .select("name, trading_as")
+    .eq("id", companyId)
+    .maybeSingle();
+  const c = data as { name: string | null; trading_as: string | null } | null;
+  return c?.trading_as?.trim() || c?.name?.trim() || null;
+}
+
+// Looks up the trading name of a manager's own firm, for orgNoreplyFrom.
+async function resolveManagerCompanyName(managerProfileId: string): Promise<string | null> {
+  try {
+    const supabase = createServerClient();
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("management_company_id")
+      .eq("id", managerProfileId)
+      .maybeSingle();
+    const companyId = (profile as { management_company_id: string | null } | null)?.management_company_id;
+    return companyId ? await companyDisplayName(companyId) : null;
+  } catch (err) {
+    console.error("[email] resolveManagerCompanyName failed:", err);
+    return null;
+  }
+}
+
+// Looks up the trading name of the firm managing an OC, for orgNoreplyFrom.
+async function resolveOcCompanyName(ocId: string): Promise<string | null> {
+  try {
+    const supabase = createServerClient();
+    const { data: oc } = await supabase
+      .from("owners_corporations")
+      .select("management_company_id")
+      .eq("id", ocId)
+      .maybeSingle();
+    const companyId = (oc as { management_company_id: string | null } | null)?.management_company_id;
+    return companyId ? await companyDisplayName(companyId) : null;
+  } catch (err) {
+    console.error("[email] resolveOcCompanyName failed:", err);
+    return null;
+  }
 }
 
 // Resolves the personalised FROM header for a given manager profile. Returns
@@ -60,7 +116,7 @@ export async function resolveManagerFromHeader(
 export async function resolveOcSenderFromHeader(
   ocId: string | null | undefined,
 ): Promise<string> {
-  if (!ocId) return noreplyFrom();
+  if (!ocId) return systemFrom();
   try {
     const supabase = createServerClient();
     const { data: member } = await supabase
@@ -80,15 +136,8 @@ export async function resolveOcSenderFromHeader(
   } catch (err) {
     console.error("[email] resolveOcSenderFromHeader failed:", err);
   }
-  return noreplyFrom();
-}
-
-// EMAIL_DRY_RUN gate (PP6-C-1 retrofit). Set EMAIL_DRY_RUN=true in dev/staging
-// .env.local to short-circuit all sends with a console.log; production leaves
-// it unset (defaults to false → real sends). Replaces the older
-// `!RESEND_API_KEY` gate which doesn't work in dev where the key is set.
-function isDryRun(): boolean {
-  return process.env.EMAIL_DRY_RUN === "true";
+  // No manager mailbox resolvable. Still send as the FIRM, not as us.
+  return orgNoreplyFrom(await resolveOcCompanyName(ocId));
 }
 
 // ─── Unified transport (Gmail or Resend) ──────────────────────────────────
@@ -220,12 +269,9 @@ async function resolveOcPrimaryManagerProfileId(
   }
 }
 
-// Uniform result type for the 4 new owner-facing senders introduced in
-// PP6-C-1. Existing 5 senders (invitation/levy/basiq×3) keep their original
-// `{ success } | { error }` shape , retrofit is limited to the DRY_RUN gate.
+// Uniform result type for the owner-facing senders.
 export type EmailSendResult =
   | { success: true; id: string | null }
-  | { dryRun: true }
   | { error: string };
 
 interface SendInvitationEmailParams {
@@ -263,13 +309,8 @@ export async function sendPasswordResetCodeEmail({
 }: SendVerificationCodeEmailParams): Promise<{ success: true } | { error: string }> {
   const greeting = name ? `Hi ${name},` : "Hi,";
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=password_reset to=${to} code=${code}`);
-    return { success: true };
-  }
-
   const { error } = await getResend().emails.send({
-    from: noreplyFrom(),
+    from: systemFrom(),
     to,
     subject: `Your StrataWise password reset code: ${code}`,
     html: `
@@ -302,13 +343,8 @@ export async function sendVerificationCodeEmail({
 }: SendVerificationCodeEmailParams): Promise<{ success: true } | { error: string }> {
   const greeting = name ? `Hi ${name},` : "Hi,";
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=verification to=${to} code=${code}`);
-    return { success: true };
-  }
-
   const { error } = await getResend().emails.send({
-    from: noreplyFrom(),
+    from: systemFrom(),
     to,
     subject: `Your StrataWise verification code: ${code}`,
     html: `
@@ -351,11 +387,6 @@ export async function sendInvitationEmail({
   const greeting = inviteeName ? `Hi ${inviteeName},` : "Hi,";
   const lotLine = lotNumber ? `<p style="margin:0 0 8px;color:#4A5868;font-size:14px;">Lot: <strong>${lotNumber}</strong></p>` : "";
   const invitedByLine = invitedByName ? ` by ${invitedByName}` : "";
-
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=invitation to=${to} subject="You've been invited to ${ocName}"`);
-    return { success: true };
-  }
 
   const from =
     (inviterProfileId && (await resolveManagerFromHeader(inviterProfileId))) ||
@@ -440,11 +471,6 @@ export async function sendLevyEmail({
   const greeting = ownerName ? `Hi ${ownerName},` : "Hi,";
   const logoHtml = logoImg(companyLogoUrl);
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=levy_notice to=${to} ref=${referenceNumber} subject="Levy Notice , ${ocName} , ${periodLabel}"`);
-    return { success: true };
-  }
-
   // Manager-picked override wins over the OC-resolved default. The
   // override is already a bare email so wrap it with the firm display
   // name when we have one; otherwise pass through as-is.
@@ -510,12 +536,8 @@ async function sendSystemEmail(
   // Dry-run gate (PP6-C-1) , also covers the original "no API key in dev"
   // case for backward compatibility (an unset key is still treated as
   // dry-run, so existing dev workflows without a key keep working).
-  if (isDryRun() || !process.env.RESEND_API_KEY) {
-    console.log(`[email-stub] to=${to} subject="${subject}"`);
-    return { success: true };
-  }
   const { error } = await getResend().emails.send({
-    from: noreplyFrom(),
+    from: systemFrom(),
     to,
     subject,
     html: bodyHtml,
@@ -706,11 +728,6 @@ export async function sendPaymentReceivedEmail(
   const { to, ownerName, ocName, ocAddress, amount, paymentDate, description, lotLabel, reference, ocShortCode, companyLogoUrl, ocId } = params;
   const subject = `Payment received , ${ocName}`;
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=payment_received to=${to} amount=${amount.toFixed(2)} subject="${subject}"`);
-    return { dryRun: true };
-  }
-
   const from = await resolveOcSenderFromHeader(ocId ?? null);
 
   const refLine = reference
@@ -777,11 +794,6 @@ export async function sendOverdueReminderEmail(
 ): Promise<EmailSendResult> {
   const { to, ownerName, ocName, ocAddress, referenceNumber, amountOutstanding, daysOverdue, dueDate, penaltyInterestAccrued, ocShortCode, companyLogoUrl, pdfBuffer, pdfFilename, ocId } = params;
   const subject = `Your levy is overdue , ${ocName}`;
-
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=overdue_reminder to=${to} ref=${referenceNumber} days=${daysOverdue} interest=${penaltyInterestAccrued.toFixed(2)} pdf=${pdfBuffer ? "yes" : "no"} subject="${subject}"`);
-    return { dryRun: true };
-  }
 
   const interestLine = penaltyInterestAccrued > 0
     ? `<p style="margin:0 0 4px;font-size:13px;color:#4A5868;">Interest accrued</p><p style="margin:0 0 12px;font-size:14px;font-weight:600;color:#dc2626;">$${penaltyInterestAccrued.toFixed(2)}</p>`
@@ -863,11 +875,6 @@ export async function sendClaimMatchedEmail(
   const { to, ownerName, ocName, ocAddress, amount, claimDate, paymentMethod, lotLabel, ocShortCode, companyLogoUrl, ocId } = params;
   const subject = `Your payment has been confirmed , ${ocName}`;
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=claim_matched to=${to} amount=${amount.toFixed(2)} subject="${subject}"`);
-    return { dryRun: true };
-  }
-
   const from = await resolveOcSenderFromHeader(ocId ?? null);
 
   const ctaBlock = buildCtaBlock(
@@ -924,11 +931,6 @@ export async function sendClaimRejectedEmail(
 ): Promise<EmailSendResult> {
   const { to, ownerName, ocName, ocAddress, amount, claimDate, rejectionReason, lotLabel, ocShortCode, companyLogoUrl, ocId } = params;
   const subject = `Update on your payment claim , ${ocName}`;
-
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=claim_rejected to=${to} amount=${amount.toFixed(2)} subject="${subject}"`);
-    return { dryRun: true };
-  }
 
   const from = await resolveOcSenderFromHeader(ocId ?? null);
 
@@ -999,11 +1001,6 @@ export async function sendNewClaimSubmittedEmail(
   const { to, managerName, ocName, lotLabel, ownerName, amount, claimDate, paymentMethod, notes, ocShortCode, companyLogoUrl, ocId } = params;
   const subject = `New owner payment claim , ${ocName} ${lotLabel}`;
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=new_claim_submitted to=${to} amount=${amount.toFixed(2)} subject="${subject}"`);
-    return { dryRun: true };
-  }
-
   const greetingLine = managerName ? `Hi ${managerName},` : "Hi,";
   const ownerLabel = ownerName ?? "An owner";
   const notesBlock = notes && notes.trim().length > 0
@@ -1045,7 +1042,7 @@ export async function sendNewClaimSubmittedEmail(
   // their own firm (and routes through Gmail when configured).
   const resendFrom = ocId
     ? await resolveOcSenderFromHeader(ocId)
-    : noreplyFrom();
+    : systemFrom();
   const { data, error } = await transportSend({
     ocId: ocId ?? null,
     to,
@@ -1082,11 +1079,6 @@ export async function sendLevyCsvReminderEmail(
   const { to, managerName, ocName, ocShortCode, nextSendDate, lastImportLabel, companyLogoUrl, ocId } = params;
   const subject = `Bank CSV due before the next levy run , ${ocName}`;
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=levy_csv_reminder to=${to} oc="${ocName}" nextSend=${nextSendDate}`);
-    return { dryRun: true };
-  }
-
   const greetingLine = managerName ? `Hi ${managerName},` : "Hi,";
   const ctaBlock = buildCtaBlock(
     ocShortCode,
@@ -1112,7 +1104,7 @@ export async function sendLevyCsvReminderEmail(
     </p>
   `, companyLogoUrl);
 
-  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : noreplyFrom();
+  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : systemFrom();
   const { data, error } = await transportSend({ ocId: ocId ?? null, to, subject, html, resendFrom });
   if (error) {
     console.error("Failed to send levy_csv_reminder email:", error);
@@ -1139,10 +1131,6 @@ export async function sendComplianceReminderEmail(
   params: SendComplianceReminderEmailParams,
 ): Promise<EmailSendResult> {
   const { to, managerName, heading, body, ctaPath, ctaShortCode, ctaLabel, companyLogoUrl, ocId } = params;
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=compliance_reminder to=${to} heading="${heading}"`);
-    return { dryRun: true };
-  }
   const greetingLine = managerName ? `Hi ${escapeHtml(managerName)},` : "Hi,";
   const cta = ctaShortCode && ctaPath
     ? buildCtaBlock(ctaShortCode, ctaPath, ctaLabel ?? "Open StrataWise", body)
@@ -1153,7 +1141,7 @@ export async function sendComplianceReminderEmail(
     ${cta}
     <p style="margin:24px 0 0;color:#4A5868;font-size:12px;line-height:1.5;">You can turn these reminders off in Settings , Notifications.</p>
   `, companyLogoUrl);
-  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : noreplyFrom();
+  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : systemFrom();
   const { data, error } = await transportSend({ ocId: ocId ?? null, to, subject: heading, html, resendFrom });
   if (error) { console.error("Failed to send compliance_reminder email:", error); return { error: error.message }; }
   return { success: true, id: data?.id ?? null };
@@ -1183,11 +1171,6 @@ export async function sendMeetingNoticeEmail(
   const { to, ownerName, ocName, meetingTypeLabel, meetingTitle, whenLabel, location, onlineLink, agenda, pdfBuffer, pdfFilename, companyLogoUrl, ocId } = params;
   const subject = `Meeting notice , ${meetingTypeLabel} for ${ocName}`;
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=meeting_notice to=${to} oc="${ocName}" when=${whenLabel}`);
-    return { dryRun: true };
-  }
-
   const greetingLine = ownerName ? `Hi ${escapeHtml(ownerName)},` : "Hi,";
   const agendaBlock = agenda.length > 0
     ? `<div style="background:#FAF7F0;border:1px solid #E5E0D3;border-radius:6px;padding:16px;margin:0 0 24px;">
@@ -1214,7 +1197,7 @@ export async function sendMeetingNoticeEmail(
     ${agendaBlock}
   `, companyLogoUrl);
 
-  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : noreplyFrom();
+  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : systemFrom();
   const { data, error } = await transportSend({
     ocId: ocId ?? null,
     to,
@@ -1250,11 +1233,6 @@ export async function sendMaintenanceReminderEmail(
   const { to, ownerName, ocName, jobTitle, occurrenceLabel, contractorName, scope, companyLogoUrl, ocId } = params;
   const subject = `Upcoming maintenance , ${jobTitle} at ${ocName}`;
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=maintenance_update to=${to} oc="${ocName}" job="${jobTitle}"`);
-    return { dryRun: true };
-  }
-
   const greetingLine = ownerName ? `Hi ${escapeHtml(ownerName)},` : "Hi,";
   const html = brandShell(`
     <h2 style="margin:0 0 16px;font-size:20px;font-weight:600;color:#0E314C;">Upcoming maintenance</h2>
@@ -1271,7 +1249,7 @@ export async function sendMaintenanceReminderEmail(
     </div>
   `, companyLogoUrl);
 
-  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : noreplyFrom();
+  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : systemFrom();
   const { data, error } = await transportSend({ ocId: ocId ?? null, to, subject, html, resendFrom });
   if (error) {
     console.error("Failed to send maintenance_update email:", error);
@@ -1301,18 +1279,13 @@ export async function sendEscalationEmail(
 ): Promise<EmailSendResult> {
   const { to, subject, bodyText, companyLogoUrl, ocId, pdfBuffer, pdfFilename, extraAttachments } = params;
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=levy_followup to=${to} subject="${subject}"`);
-    return { dryRun: true };
-  }
-
   const paragraphs = bodyText
     .split(/\n{2,}/)
     .map((p) => `<p style="margin:0 0 14px;color:#0E314C;font-size:14px;line-height:1.6;">${escapeHtml(p).replace(/\n/g, "<br/>")}</p>`)
     .join("");
   const html = brandShell(paragraphs, companyLogoUrl);
 
-  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : noreplyFrom();
+  const resendFrom = ocId ? await resolveOcSenderFromHeader(ocId) : systemFrom();
   const attachments = [
     ...(pdfBuffer && pdfFilename ? [{ filename: pdfFilename, content: pdfBuffer, contentType: "application/pdf" }] : []),
     ...(extraAttachments ?? []),
@@ -1384,11 +1357,6 @@ export async function sendSecondReminderEmail(
     pdfBuffer, pdfFilename, ocId,
   } = params;
   const subject = `Second reminder , levy overdue ${daysOverdue}+ days , ${ocName}`;
-
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=second_reminder to=${to} ref=${referenceNumber} days=${daysOverdue} pdf=${pdfBuffer ? "yes" : "no"} subject="${subject}"`);
-    return { dryRun: true };
-  }
 
   const interestLine = penaltyInterestAccrued > 0
     ? `<p style="margin:0 0 4px;font-size:13px;color:#4A5868;">Interest accrued</p><p style="margin:0 0 12px;font-size:14px;font-weight:600;color:#dc2626;">$${penaltyInterestAccrued.toFixed(2)}</p>`
@@ -1471,11 +1439,6 @@ export async function sendFinalNoticeEmail(
   } = params;
   const subject = `FINAL NOTICE , outstanding levy , ${ocName}`;
 
-  if (isDryRun()) {
-    console.log(`[email-dry-run] type=levy_final_notice to=${to} ref=${referenceNumber} days=${daysOverdue} pdf=${pdfBuffer ? "yes" : "no"} subject="${subject}"`);
-    return { dryRun: true };
-  }
-
   const interestLine = penaltyInterestAccrued > 0
     ? `<p style="margin:0 0 4px;font-size:13px;color:#4A5868;">Interest accrued</p><p style="margin:0 0 12px;font-size:14px;font-weight:600;color:#dc2626;">$${penaltyInterestAccrued.toFixed(2)}</p>`
     : "";
@@ -1550,13 +1513,6 @@ export async function sendManagerMessageEmail(params: {
 }): Promise<EmailSendResult> {
   const { managerProfileId, to, subject, bodyText, companyLogoUrl, attachments } = params;
 
-  if (isDryRun()) {
-    console.log(
-      `[email-dry-run] type=manager_message from-profile=${managerProfileId} to=${to} subject=${subject} attachments=${attachments?.length ?? 0}`,
-    );
-    return { dryRun: true };
-  }
-
   // Dispatch based on the manager's company mail_provider:
   //   stratawise → Resend transport, FROM <username>@stratawise.com.au
   //   gmail      → Gmail API via DWD impersonation (real transport below)
@@ -1621,7 +1577,9 @@ export async function sendManagerMessageEmail(params: {
     }
   }
 
-  const from = (await resolveManagerFromHeader(managerProfileId)) ?? noreplyFrom();
+  const from =
+    (await resolveManagerFromHeader(managerProfileId)) ??
+    orgNoreplyFrom(await resolveManagerCompanyName(managerProfileId));
 
   // Plain, left-aligned email body. We escape HTML to neutralise injection
   // from owner-typed content, then convert newlines to <br/> so every

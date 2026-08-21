@@ -8,7 +8,6 @@
  * dimension) which is the only path with non-trivial logic worth a
  * standalone harness.
  *
- * EMAIL_DRY_RUN forced on for consistency with the standard verification
  * pattern (the validator itself never sends mail; the gate is here as a
  * safety net for cross-imports).
  *
@@ -18,7 +17,6 @@
 
 import { config } from "dotenv";
 config({ path: ".env.local" });
-process.env.EMAIL_DRY_RUN = "true";
 
 import { validateLogoFile } from "./company-branding";
 import {

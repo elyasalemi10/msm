@@ -9,18 +9,16 @@ import {
   type OwnershipHistoryEntry,
 } from "@/lib/validations/settlement";
 import { fetchObject } from "@/lib/storage/r2";
-import { runDocumentAiOcr } from "@/lib/google/document-ai";
 import { parseSettlementPdf, type ParsedSettlement } from "@/lib/parse-settlement";
 
 import { generateInviteCode } from "@/lib/invite-code";
 
 // ─── Settlement PDF parsing ─────────────────────────────────────
 //
-// First-cut: we run Document AI OCR on every uploaded settlement PDF and
-// store the sanitised raw text on `documents.ocr_text` (parallel run
-// pattern shared with the wizard's plan-of-subdivision flow , see
-// CLAUDE.md "Document OCR" rule). The raw text powers full-text search +
-// future Gemini structured extraction.
+// Gemini reads the settlement PDF here because the manager is waiting on
+// the review form. Full-text OCR of the same file is NOT run inline , the
+// documents row is left at ocr_status='pending' and the cron sweep fills
+// in ocr_text for search (see CLAUDE.md "Document OCR" rule).
 //
 // Structured field extraction via Gemini (Settlement statement → new
 // owner name / settlement date / sale price / etc.) is deferred. The
@@ -163,32 +161,8 @@ async function parseAndOcrSettlement(
     return null;
   }
   const buffer = Buffer.from(bytes);
-  const mimeType = doc.mime_type ?? "application/pdf";
 
-  // Skip OCR if already done , keeps the parse path idempotent.
-  const shouldOcr = doc.ocr_status !== "complete";
-
-  const [parseResult, ocrResult] = await Promise.allSettled([
-    parseSettlementPdf(buffer),
-    shouldOcr
-      ? runDocumentAiOcr(buffer, mimeType)
-      : Promise.resolve(null),
-  ]);
-
-  // Persist OCR raw text , fire and forget the update; failures log
-  // server-side but don't block the review form.
-  if (ocrResult.status === "fulfilled" && ocrResult.value) {
-    await supabase
-      .from("documents")
-      .update({ ocr_text: ocrResult.value.text, ocr_status: "complete" })
-      .eq("id", documentId);
-  } else if (ocrResult.status === "rejected") {
-    console.error("parseAndOcrSettlement: OCR failed", ocrResult.reason);
-    await supabase
-      .from("documents")
-      .update({ ocr_status: "failed" })
-      .eq("id", documentId);
-  }
+  const [parseResult] = await Promise.allSettled([parseSettlementPdf(buffer)]);
 
   if (parseResult.status === "rejected") {
     console.error("parseAndOcrSettlement: Gemini parse failed", parseResult.reason);

@@ -23,7 +23,6 @@ const ALL_TASKS = [
   "daily-accrue-interest",
   "daily-check-overdue-levies",
   "gmail-watch-refresh",
-  "sweep-pending-ocr",
 ];
 
 const secret = process.env.TRIGGER_SECRET_KEY;

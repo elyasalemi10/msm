@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { z } from "zod";
 import { Resend } from "resend";
 import { createServerClient } from "@/lib/supabase";
+import { brandDomain } from "@/lib/manager-username";
 
 const waitlistSchema = z.object({
   email: z
@@ -23,8 +24,7 @@ export type WaitlistResult =
   | { success: true; alreadyOnList: boolean }
   | { success: false; error: string };
 
-const FROM_SYSTEM =
-  process.env.RESEND_SYSTEM_FROM ?? "StrataWise <noreply@myocm.com.au>";
+const FROM_SYSTEM = `StrataWise <noreply@${brandDomain()}>`;
 
 function escapeHtml(s: string): string {
   return s
@@ -86,48 +86,9 @@ export async function joinWaitlist(input: unknown): Promise<WaitlistResult> {
     return { success: false, error: "Something went wrong , please try again." };
   }
 
-  await Promise.all([
-    sendOperatorNotification({ email, name, company, role, ipAddress, userAgent }),
-    addToResendAudience({ email, name }),
-  ]);
+  await sendOperatorNotification({ email, name, company, role, ipAddress, userAgent });
 
   return { success: true, alreadyOnList: false };
-}
-
-// Adds the waitlist contact to a Resend audience (mailing list) so the
-// operator can later send broadcasts via the Resend dashboard / API.
-// Gated on RESEND_AUDIENCE_ID , when unset we skip silently so dev
-// environments without an audience don't error. Failures here never
-// block the user-facing signup.
-async function addToResendAudience(args: { email: string; name: string | null }) {
-  const audienceId = process.env.RESEND_AUDIENCE_ID?.trim();
-  if (!audienceId) return;
-
-  if (process.env.EMAIL_DRY_RUN === "true" || !process.env.RESEND_API_KEY) {
-    console.log(
-      `[email-dry-run] type=audience_add audience=${audienceId} email=${args.email}`,
-    );
-    return;
-  }
-
-  const [firstName, ...rest] = (args.name ?? "").trim().split(/\s+/);
-  const lastName = rest.join(" ");
-
-  try {
-    const resend = new Resend(process.env.RESEND_API_KEY);
-    const { error } = await resend.contacts.create({
-      email: args.email,
-      firstName: firstName || undefined,
-      lastName: lastName || undefined,
-      unsubscribed: false,
-      audienceId,
-    });
-    if (error) {
-      console.error("[waitlist] Resend audience add failed:", error);
-    }
-  } catch (err) {
-    console.error("[waitlist] Resend audience add threw:", err);
-  }
 }
 
 async function sendOperatorNotification(args: {
@@ -141,13 +102,6 @@ async function sendOperatorNotification(args: {
   const sendTo = process.env.SEND_TO?.trim();
   if (!sendTo) {
     console.warn("[waitlist] SEND_TO not configured , skipping operator notification");
-    return;
-  }
-
-  if (process.env.EMAIL_DRY_RUN === "true" || !process.env.RESEND_API_KEY) {
-    console.log(
-      `[email-dry-run] type=waitlist_signup to=${sendTo} email=${args.email}`,
-    );
     return;
   }
 

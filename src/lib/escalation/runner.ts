@@ -242,7 +242,7 @@ async function advanceInstance(supabase: any, inst: Record<string, unknown>, tod
         pdfFilename,
         extraAttachments,
       });
-      const sent = "success" in res || "dryRun" in res;
+      const sent = "success" in res;
       await supabase.from("communication_log").insert({
         oc_id: notice.oc_id,
         lot_id: notice.lot_id,
@@ -250,7 +250,7 @@ async function advanceInstance(supabase: any, inst: Record<string, unknown>, tod
         channel: "email",
         type: isFinal ? "levy_final_notice" : (step.label ?? "levy_followup"),
         subject,
-        status: "success" in res ? "sent" : "dryRun" in res ? "queued" : "failed",
+        status: "success" in res ? "sent" : "failed",
         external_id: "success" in res ? res.id : null,
         sent_at: "success" in res ? new Date().toISOString() : null,
         related_entity_type: "escalation_instance",

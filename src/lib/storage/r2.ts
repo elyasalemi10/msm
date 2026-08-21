@@ -8,7 +8,6 @@
 //   R2_ENDPOINT            , https://{account}.r2.cloudflarestorage.com
 //   R2_ACCESS_KEY_ID       , auth
 //   R2_SECRET_ACCESS_KEY   , auth
-//   R2_BUCKET_NAME         , single multi-purpose bucket
 //   R2_PUBLIC_URL          , public CDN custom domain (used for logo/levy URLs
 //                            stored in management_companies.logo_url +
 //                            levy_notices.pdf_url)
@@ -64,11 +63,7 @@ function getClient(): S3Client {
 // MUST render in unauthenticated contexts (logos in outbound email, levy
 // notice PDFs delivered to owners, avatars).
 export function getBucket(): string {
-  return (
-    process.env.R2_BUCKET_PUBLIC ??
-    process.env.R2_BUCKET_NAME ??
-    "stratawise-public"
-  );
+  return process.env.R2_BUCKET_PUBLIC ?? "stratawise-public";
 }
 
 // Key prefixes that hold SENSITIVE objects , these live in the private

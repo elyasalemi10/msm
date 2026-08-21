@@ -171,7 +171,7 @@ export async function sendLotSms(
       recipient_phone: normalised,
       body_preview: parsed.data.body.slice(0, 200),
       body_full: parsed.data.body,
-      status: smsResult.ok ? (smsResult.dryRun ? "queued" : "sent") : "failed",
+      status: smsResult.ok ? "sent" : "failed",
       external_id: smsResult.id ?? null,
       error_message: smsResult.ok ? null : smsResult.error ?? null,
       sent_at: new Date().toISOString(),
@@ -202,7 +202,7 @@ export async function sendLotSms(
 
   // Record a billable charge against the manager's company. Each ~160-char
   // segment counts as one SMS , Mobile Message bills per segment.
-  if (smsResult.ok && !smsResult.dryRun && profile.management_company_id) {
+  if (smsResult.ok && profile.management_company_id) {
     const segments = Math.max(1, Math.ceil(parsed.data.body.length / 160));
     await recordCommunicationCharge(supabase, {
       managementCompanyId: profile.management_company_id,
@@ -274,9 +274,7 @@ export async function sendLotEmail(
   let externalId: string | null = null;
   let errorMessage: string | null = null;
 
-  if ("dryRun" in result) {
-    status = "queued";
-  } else if ("error" in result) {
+  if ("error" in result) {
     status = "failed";
     errorMessage = result.error;
   } else {

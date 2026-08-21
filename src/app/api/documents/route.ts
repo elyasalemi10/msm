@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { after } from "next/server";
 import { createServerClient } from "@/lib/supabase";
 import { requireCompanyRole, requireOCAccess } from "@/lib/auth";
 import { ALLOWED_DOCUMENT_TYPES, MAX_DOCUMENT_SIZE } from "@/lib/validations/documents";
 import { uploadObject, publicUrlFor } from "@/lib/storage/r2";
-import { ingestDocumentOcr, isOcrable } from "@/lib/ocr/ingest";
-import { tasks } from "@trigger.dev/sdk";
+import { isOcrable } from "@/lib/ocr/ingest";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -93,12 +91,9 @@ export async function POST(request: NextRequest) {
   // structured output. Doc AI's `ocr_text` lands on the documents
   // row; the inline parse's structured columns live wherever they
   // belong (insurance_policies, settlements, oc_drafts, etc).
-  // ocr_status starts "pending" so the Trigger.dev worker can flip it
-  // to "complete" once Doc AI finishes; the inline self-OCR paths
-  // bypass that flag (they don't touch ocr_status when they finish
-  // their structured write).
+  // ocr_status starts "pending" so the cron sweep can flip it to
+  // "complete" once Document AI finishes.
   const willOcr = isOcrable(file.type);
-  const queueBackgroundOcr = willOcr;
   const { data: doc, error } = await supabase
     .from("documents")
     .insert({
@@ -135,34 +130,10 @@ export async function POST(request: NextRequest) {
     metadata: lotId ? { lot_id: lotId } : null,
   });
 
-  // Kick OCR on the Trigger.dev worker so the client returns instantly and
-  // the OCR doesn't have to share the serverless function's RAM / time
-  // budget. The task id matches trigger/ocr-documents.ts's `id`. A fallback
-  // to the in-process pipeline runs only when TRIGGER_SECRET_KEY isn't
-  // configured (local dev without Trigger.dev) , production always queues.
-  //
-  // Self-OCR categories (settlement / insurance / plan / rules) are
-  // skipped here , their own flow already runs OCR inline and needs the
-  // values immediately.
-  if (queueBackgroundOcr) {
-    if (process.env.TRIGGER_SECRET_KEY) {
-      try {
-        await tasks.trigger("ocr-document", { documentId: doc.id });
-      } catch (err) {
-        console.error(
-          "documents.POST: failed to queue ocr-document, falling back to in-process OCR",
-          err,
-        );
-        after(async () => {
-          await ingestDocumentOcr(doc.id);
-        });
-      }
-    } else {
-      after(async () => {
-        await ingestDocumentOcr(doc.id);
-      });
-    }
-  }
+  // OCR is never run in the request path , it costs seconds and the user
+  // is waiting. The row is left at ocr_status='pending' and the cron sweep
+  // (/api/cron/ocr-sweep) picks it up within 10 minutes and fills in
+  // ocr_text. Search just doesn't match the file's contents until then.
 
   return NextResponse.json({
     ...doc,

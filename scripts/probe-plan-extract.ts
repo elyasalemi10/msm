@@ -41,7 +41,7 @@ function buildClient(): GoogleGenAI {
     return new GoogleGenAI({
       vertexai: true,
       project: credentials.project_id,
-      location: process.env.GEMINI_LOCATION?.trim() || "global",
+      location: "global",
       googleAuthOptions: { credentials: credentials as object },
     });
   }

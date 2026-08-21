@@ -31,10 +31,7 @@ export async function getManagerSendAddress(): Promise<{ address: string } | { a
 // "From" row matches the value that landed on the recipient's handset.
 export async function getSmsSenderId(): Promise<{ sender: string | null }> {
   await requireCompanyRole();
-  const sender =
-    process.env.MOBILE_MESSAGE_SENDER_ID ??
-    process.env.MOBILE_MESSAGE_SENDER ??
-    null;
+  const sender = process.env.MOBILE_MESSAGE_SENDER_ID ?? null;
   return { sender };
 }
 

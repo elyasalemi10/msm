@@ -7,7 +7,6 @@ import { insertOCWithCode } from "@/lib/oc-code";
 import { parsePlanPdf, type ParsedPlan } from "@/lib/parse-plan";
 import { parseRulesPdf, type ParsedRulesDocument } from "@/lib/parse-rules";
 import { parseInsurancePdf, type ParsedInsurancePolicy } from "@/lib/parse-insurance";
-import { runDocumentAiOcr } from "@/lib/google/document-ai";
 import { parseDrnCsv, matchDrnsToLots, type DrnMatchResult, type LotForMatch, type LotOwnerForMatch } from "@/lib/macquarie/drn-import";
 import { uploadObject, fetchObject, deleteObject, publicUrlFor } from "@/lib/storage/r2";
 
@@ -632,13 +631,10 @@ export async function parseDraftWithGemini(draftId: string) {
       return { error: "We couldn't read the uploaded plan." };
     }
 
-    // Gemini parse + Document AI OCR fire in parallel (see parseDraftRules
-    // for rationale). OCR text gets stashed on the draft so completeWizard
-    // can ship a search-ready documents row on day one.
-    const [parsedResult, ocrResult] = await Promise.allSettled([
-      parsePlanPdf(buf),
-      runDocumentAiOcr(buf, "application/pdf"),
-    ]);
+    // Only the Gemini read runs here , it's what the manager is waiting on.
+    // Full-text OCR happens later on the cron sweep against the documents
+    // row completeWizard creates.
+    const [parsedResult] = await Promise.allSettled([parsePlanPdf(buf)]);
     if (parsedResult.status === "rejected") {
       console.error("parseDraftWithGemini: parser failed", parsedResult.reason);
       await supabase.from("oc_drafts").update({
@@ -649,10 +645,6 @@ export async function parseDraftWithGemini(draftId: string) {
       return { error: "Couldn't read this PDF automatically." };
     }
     const parsed: ParsedPlan = parsedResult.value;
-    const planOcrText = ocrResult.status === "fulfilled" ? ocrResult.value.text : null;
-    if (ocrResult.status === "rejected") {
-      console.error("parseDraftWithGemini: OCR failed (non-fatal)", ocrResult.reason);
-    }
 
     // Document-type gate: Gemini saw the PDF and decided it's not a Plan of
     // Subdivision. Surface a clear message and don't pollute draft_json with
@@ -708,7 +700,6 @@ export async function parseDraftWithGemini(draftId: string) {
         parse_status: "complete",
         parse_completed_at: new Date().toISOString(),
         parse_error: null,
-        plan_ocr_text: planOcrText,
       })
       .eq("id", draft.id);
     if (error) return { error: error.message };
@@ -790,16 +781,8 @@ export async function parseDraftRules(draftId: string) {
       return { error: "We couldn't read the uploaded rules document." };
     }
 
-    // Fire Gemini parse + Document AI OCR concurrently. Both calls take PDF
-    // bytes independently, so doing them in parallel saves the slower of the
-    // two (OCR) instead of paying for both serially. OCR result is stashed
-    // on the draft so completeWizard can write it straight to documents.ocr_*
-    // , the document is searchable the moment the OC is created, no second
-    // background pass needed.
-    const [parsedResult, ocrResult] = await Promise.allSettled([
-      parseRulesPdf(buf),
-      runDocumentAiOcr(buf, "application/pdf"),
-    ]);
+    // Gemini only , full-text OCR is the cron sweep's job.
+    const [parsedResult] = await Promise.allSettled([parseRulesPdf(buf)]);
 
     if (parsedResult.status === "rejected") {
       console.error("parseDraftRules: Gemini parse failed", parsedResult.reason);
@@ -812,20 +795,11 @@ export async function parseDraftRules(draftId: string) {
       };
     }
 
-    // OCR failure is non-fatal , Gemini's structured output is the
-    // primary thing managers see. We just lose the searchable plain-text
-    // index until the background job retries.
-    const ocrText = ocrResult.status === "fulfilled" ? ocrResult.value.text : null;
-    if (ocrResult.status === "rejected") {
-      console.error("parseDraftRules: OCR failed (non-fatal)", ocrResult.reason);
-    }
-
     const supabase = createServerClient();
     const { error } = await supabase
       .from("oc_drafts")
       .update({
         rules_parsed_json: parsed as unknown as Record<string, unknown>,
-        rules_ocr_text: ocrText,
       })
       .eq("id", draft.id);
     if (error) return { error: error.message };
@@ -913,13 +887,8 @@ export async function uploadAndParseCoC(
       return { error: "Couldn't save your file , please try again." };
     }
 
-    // Parallel Gemini + Document AI. OCR result is keyed by the storage key
-    // on the draft so completeWizard can stitch each CoC's OCR text onto its
-    // own documents row.
-    const [parsedResult, ocrResult] = await Promise.allSettled([
-      parseInsurancePdf(buf),
-      runDocumentAiOcr(buf, "application/pdf"),
-    ]);
+    // Gemini only , full-text OCR is the cron sweep's job.
+    const [parsedResult] = await Promise.allSettled([parseInsurancePdf(buf)]);
     if (parsedResult.status === "rejected") {
       console.error("uploadAndParseCoC: parser failed", parsedResult.reason);
       return { error: "We couldn't read this PDF automatically. Enter details manually." };
@@ -933,22 +902,6 @@ export async function uploadAndParseCoC(
         error: `That didn't look like a certificate of currency (looks like: ${parsed.document_type_guess || "another document type"}). Upload a different PDF or enter details manually.`,
       };
     }
-    const ocrText = ocrResult.status === "fulfilled" ? ocrResult.value.text : null;
-    if (ocrResult.status === "rejected") {
-      console.error("uploadAndParseCoC: OCR failed (non-fatal)", ocrResult.reason);
-    }
-
-    // Stash the OCR text keyed by R2 storage key on the draft. completeWizard
-    // reads this map to populate documents.ocr_text on each CoC's row.
-    if (ocrText) {
-      const supabase = createServerClient();
-      const existing = (draft.insurance_ocr_text_by_key as Record<string, string> | null) ?? {};
-      await supabase
-        .from("oc_drafts")
-        .update({ insurance_ocr_text_by_key: { ...existing, [key]: ocrText } })
-        .eq("id", draft.id);
-    }
-
     // Compare cert PS number to the OC's. Normalise both sides to handle
     // whitespace + casing differences. ps_match is true only when both sides
     // have a value AND they agree.
@@ -1923,7 +1876,6 @@ export async function completeWizard(draftId: string) {
     // just register a documents row pointing at it so it surfaces in the OC's
     // documents tab and is full-text searchable once OCR completes.
     if (draft.plan_storage_key && draft.plan_filename) {
-      const cachedPlanOcr = draft.plan_ocr_text as string | null;
       await supabase.from("documents").insert({
         oc_id: oc.id,
         lot_id: null,
@@ -1935,12 +1887,8 @@ export async function completeWizard(draftId: string) {
         mime_type: "application/pdf",
         is_confidential: false,
         uploaded_by: profile.id,
-        // OCR was already done during the wizard (Document AI ran in
-        // parallel with Gemini) , write the text now so the document is
-        // search-ready immediately. Falls back to "pending" if the OCR
-        // call failed at parse time.
-        ocr_text: cachedPlanOcr ?? null,
-        ocr_status: cachedPlanOcr ? "complete" : "pending",
+        // Full-text OCR runs on the cron sweep, not here.
+        ocr_status: "pending",
       });
     }
 
@@ -1948,7 +1896,6 @@ export async function completeWizard(draftId: string) {
     // parsed rules into oc_rules so they're searchable + linkable.
     let rulesDocumentId: string | null = null;
     if (d.rules_source === "custom" && draft.rules_storage_key && draft.rules_filename) {
-      const cachedRulesOcr = draft.rules_ocr_text as string | null;
       const { data: rulesDoc } = await supabase.from("documents").insert({
         oc_id: oc.id,
         lot_id: null,
@@ -1960,8 +1907,7 @@ export async function completeWizard(draftId: string) {
         mime_type: "application/pdf",
         is_confidential: false,
         uploaded_by: profile.id,
-        ocr_text: cachedRulesOcr ?? null,
-        ocr_status: cachedRulesOcr ? "complete" : "pending",
+        ocr_status: "pending",
       }).select("id").single();
       rulesDocumentId = rulesDoc?.id ?? null;
 
@@ -2066,7 +2012,6 @@ export async function completeWizard(draftId: string) {
       // keyed by R2 storage_key so policy inserts below can attach
       // source_document_id back to the originating cert.
       const cocs = d.insurance_cocs ?? [];
-      const cocOcrByKey = (draft.insurance_ocr_text_by_key as Record<string, string> | null) ?? {};
       const cocDocByKey = new Map<string, string>();
       for (let idx = 0; idx < cocs.length; idx++) {
         const coc = cocs[idx];
@@ -2075,7 +2020,6 @@ export async function completeWizard(draftId: string) {
           ocName: d.oc_name,
           index: cocs.length > 1 ? idx + 1 : undefined,
         });
-        const cachedOcr = cocOcrByKey[coc.storage_key] ?? null;
         const { data: docRow } = await supabase
           .from("documents")
           .insert({
@@ -2089,8 +2033,7 @@ export async function completeWizard(draftId: string) {
             mime_type: "application/pdf",
             is_confidential: false,
             uploaded_by: profile.id,
-            ocr_text: cachedOcr,
-            ocr_status: cachedOcr ? "complete" : "pending",
+            ocr_status: "pending",
           })
           .select("id")
           .single();

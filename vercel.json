@@ -10,5 +10,11 @@
     "src/app/(dashboard)/ocs/[ocCode]/manage/actions.ts": {
       "maxDuration": 300
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/ocr-sweep",
+      "schedule": "*/10 * * * *"
+    }
+  ]
 }

@@ -12,7 +12,6 @@
 
 import { config } from "dotenv";
 config({ path: ".env.local" });
-process.env.EMAIL_DRY_RUN = "true";
 
 // next/cache stub , updateNotificationPreferences calls revalidatePath.
 import { createRequire } from "node:module";

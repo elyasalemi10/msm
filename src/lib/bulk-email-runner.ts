@@ -153,14 +153,13 @@ export async function runBulkEmail(payload: BulkEmailPayload): Promise<{ sent: n
         companyLogoUrl: logoUrl,
         ocId: meeting.oc_id,
       });
-      const ok = "success" in res || "dryRun" in res;
-      if (ok) sent++; else failed++;
+      if ("success" in res) sent++; else failed++;
       await logComm(supabase, {
         ocId: meeting.oc_id,
         email: owner.email,
         type: "meeting_notice",
         subject: `Meeting notice , ${typeLabel} for ${ocName}`,
-        status: "success" in res ? "sent" : "dryRun" in res ? "queued" : "failed",
+        status: "success" in res ? "sent" : "failed",
         externalId: "success" in res ? res.id : null,
         relatedType: "meeting",
         relatedId: meeting.id,
@@ -217,14 +216,13 @@ export async function runBulkEmail(payload: BulkEmailPayload): Promise<{ sent: n
       companyLogoUrl: logoUrl,
       ocId: job.oc_id,
     });
-    const ok = "success" in res || "dryRun" in res;
-    if (ok) sent++; else failed++;
+    if ("success" in res) sent++; else failed++;
     await logComm(supabase, {
       ocId: job.oc_id,
       email: owner.email,
       type: "maintenance_update",
       subject: `Upcoming maintenance , ${job.title} at ${ocName}`,
-      status: "success" in res ? "sent" : "dryRun" in res ? "queued" : "failed",
+      status: "success" in res ? "sent" : "failed",
       externalId: "success" in res ? res.id : null,
       relatedType: "recurring_job",
       relatedId: job.id,

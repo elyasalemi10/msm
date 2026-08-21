@@ -7,7 +7,6 @@
  *   - getTrustAccountSummary (RP-6)
  *
  * Auth via the __setUserIdResolverForVerification seam (manager identity
- * resolved per scenario). EMAIL_DRY_RUN forced on per the standard pattern.
  *
  * Usage:
  *   npx tsx src/lib/actions/reports.verification.ts
@@ -17,7 +16,6 @@
 
 import { config } from "dotenv";
 config({ path: ".env.local" });
-process.env.EMAIL_DRY_RUN = "true";
 
 import { createRequire } from "node:module";
 const scriptRequire = createRequire(import.meta.url);

@@ -14,22 +14,12 @@ export interface SmsSendResult {
   ok: boolean;
   id?: string;
   error?: string;
-  dryRun?: boolean;
 }
 
 // The Mobile Message dashboard issues an "API key" string per account. Their
-// HTTP Basic auth pairs the account username with that key in the password
-// slot. MOBILE_MESSAGE_API_KEY is the canonical env var; MOBILE_MESSAGE_PASSWORD
-// is kept as a fallback for any older deployments still using that name.
+// HTTP Basic auth pairs the account username with that key in the password slot.
 function mobileMessagePassword(): string | undefined {
-  return process.env.MOBILE_MESSAGE_API_KEY ?? process.env.MOBILE_MESSAGE_PASSWORD;
-}
-
-function isDryRun(): boolean {
-  if (process.env.SMS_DRY_RUN === "true") return true;
-  if (!process.env.MOBILE_MESSAGE_USERNAME) return true;
-  if (!mobileMessagePassword()) return true;
-  return false;
+  return process.env.MOBILE_MESSAGE_API_KEY;
 }
 
 // Normalises AU mobile numbers to E.164 (+61…). Accepts "04xxxxxxxx",
@@ -54,9 +44,9 @@ export async function sendSms(params: {
   if (!to) return { ok: false, error: "Invalid mobile number." };
   if (!params.body?.trim()) return { ok: false, error: "Message body is required." };
 
-  if (isDryRun()) {
-    console.log(`[sms-dry-run] to=${to} body=${params.body}`);
-    return { ok: true, dryRun: true };
+  if (!process.env.MOBILE_MESSAGE_USERNAME || !mobileMessagePassword()) {
+    console.error("[sms] Mobile Message credentials are not configured.");
+    return { ok: false, error: "SMS is temporarily unavailable." };
   }
 
   const auth = Buffer.from(
@@ -64,15 +54,10 @@ export async function sendSms(params: {
   ).toString("base64");
 
   // Mobile Message rejects any sender id that isn't pre-approved on the
-  // account. MOBILE_MESSAGE_SENDER_ID is the canonical env var (the
-  // dashboard surfaces it as "Sender ID"); MOBILE_MESSAGE_SENDER is kept
-  // as a fallback for older deployments. Falling back to "StrataWise" is
-  // only useful when neither is set AND that string has been registered.
+  // account. Falling back to "StrataWise" only works if that string has
+  // been registered on the account.
   const sender =
-    params.senderName ??
-    process.env.MOBILE_MESSAGE_SENDER_ID ??
-    process.env.MOBILE_MESSAGE_SENDER ??
-    "StrataWise";
+    params.senderName ?? process.env.MOBILE_MESSAGE_SENDER_ID ?? "StrataWise";
 
   try {
     const res = await fetch(ENDPOINT, {

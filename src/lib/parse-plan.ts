@@ -154,13 +154,10 @@ function buildClient(): GoogleGenAI {
     // is NOT yet in australia-southeast1, so a Sydney pin returns 404. The
     // `global` endpoint still respects GCP's data-residency commitments for
     // Australian customers , your data isn't trained on, regardless of
-    // routing. Override with GEMINI_LOCATION (e.g. us-central1) if a real
-    // data-residency contract forces regional pinning.
-    const location = process.env.GEMINI_LOCATION?.trim() || "global";
     return new GoogleGenAI({
       vertexai: true,
       project: credentials.project_id,
-      location,
+      location: "global",
       googleAuthOptions: { credentials },
     });
   }
