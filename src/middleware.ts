@@ -10,6 +10,10 @@ const PUBLIC_PATHS = [
   "/forgot-password",
   "/legal",
   "/api/webhooks",
+  // Vercel Cron endpoints. They authenticate themselves with the
+  // CRON_SECRET bearer token Vercel sends; there is no user session on a
+  // cron invocation, so the session gate would 307 them to sign-in.
+  "/api/cron",
   "/logout",
   "/sign-out",
   "/signout",
