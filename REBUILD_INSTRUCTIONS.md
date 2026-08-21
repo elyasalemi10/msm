@@ -121,7 +121,7 @@ npx tsc --noEmit
 npm run dev
 ```
 
-Open http://localhost:3002, sign in, and walk through:
+Open http://localhost:3000, sign in, and walk through:
 - Subdivision setup wizard (steps 1–5) — step 4 creates pending invitations,
   step 5 dispatches the emails.
 - Manage page → lots tab — owners display from `subdivision_members` or
