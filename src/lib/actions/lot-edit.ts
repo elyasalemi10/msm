@@ -80,8 +80,7 @@ const updateLotOwnerContactSchema = z.object({
   phone: z.string().trim().max(40).nullable().optional(),
   postal_address: z.string().trim().max(500).nullable().optional(),
   email: z.string().email().nullable().optional(),
-  // Postgrid verification carries through when the caller has already
-  // resolved a corrected address; if not supplied we re-verify here.
+  // Legacy flag from the retired address-verification integration.
   verified_postal: z
     .object({
       status: z.string(),
@@ -141,8 +140,8 @@ export async function updateLotOwnerContact(
   if (parsed.data.phone !== undefined) update.phone = parsed.data.phone;
   if (parsed.data.email !== undefined) update.email = parsed.data.email;
 
-  // Postal address , stored as-is. We no longer verify addresses with
-  // PostGrid (it's used for the print/mail product only now).
+  // Postal address , stored as the manager typed it. Address
+  // verification is not integrated.
   if (parsed.data.postal_address !== undefined) {
     update.postal_address = parsed.data.postal_address;
   }

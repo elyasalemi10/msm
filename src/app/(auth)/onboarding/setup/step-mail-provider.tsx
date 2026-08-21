@@ -21,17 +21,16 @@ import { saveMailProvider } from "./actions";
 // Step 3 of onboarding. The manager picks where outbound mail comes from:
 //   - stratawise: <username>@stratawise.com.au (default , no setup needed)
 //   - gmail: their firm's Google Workspace mailbox via Domain-Wide Delegation
-//   - outlook: their firm's Microsoft 365 mailbox via app-only consent
 //
 // Reading + sending only. We make that explicit in the copy. Customers can
 // change or disconnect from /settings later , disconnecting falls back to
 // stratawise so outbound never breaks silently.
 //
-// Today: stratawise is wired end-to-end. gmail/outlook capture the choice
-// + domain; the actual transport flips on once the customer authorises us
+// Today: stratawise is wired end-to-end. gmail captures the choice +
+// domain; the actual transport flips on once the customer authorises us
 // in their admin console.
 
-type Provider = "stratawise" | "gmail" | "outlook";
+type Provider = "stratawise" | "gmail";
 
 export function StepMailProvider({
   onNext,
@@ -41,7 +40,6 @@ export function StepMailProvider({
   onBack: () => void;
 }) {
   const [choice, setChoice] = useState<"stratawise" | "own" | null>(null);
-  const [provider, setProvider] = useState<Provider | null>(null);
   const [domain, setDomain] = useState("");
   const [pending, setPending] = useState(false);
 
@@ -50,17 +48,13 @@ export function StepMailProvider({
       toast.error("Pick how you want to send email.");
       return;
     }
-    if (choice === "own" && !provider) {
-      toast.error("Pick Gmail or Outlook.");
-      return;
-    }
     if (choice === "own" && !domain.trim()) {
       toast.error("Enter your firm's email domain.");
       return;
     }
 
     setPending(true);
-    const finalProvider: Provider = choice === "stratawise" ? "stratawise" : provider!;
+    const finalProvider: Provider = choice === "stratawise" ? "stratawise" : "gmail";
     const res = await saveMailProvider({
       provider: finalProvider,
       domain: choice === "stratawise" ? null : domain.trim(),
@@ -91,7 +85,6 @@ export function StepMailProvider({
           type="button"
           onClick={() => {
             setChoice("stratawise");
-            setProvider(null);
             setDomain("");
           }}
           className={cn(
@@ -139,7 +132,7 @@ export function StepMailProvider({
           </div>
           <div className="flex-1">
             <p className="text-sm font-semibold text-foreground">
-              Connect your own Gmail or Outlook
+              Connect your own Gmail
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               Email sends from your real address. We only{" "}
@@ -159,26 +152,6 @@ export function StepMailProvider({
       {/* Sub-choice when "own" */}
       {choice === "own" && (
         <div className="rounded-lg border border-border bg-cool-muted p-4 space-y-4">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              Provider
-            </p>
-            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <ProviderCard
-                label="Gmail"
-                sub="Google Workspace"
-                selected={provider === "gmail"}
-                onClick={() => setProvider("gmail")}
-              />
-              <ProviderCard
-                label="Outlook"
-                sub="Microsoft 365"
-                selected={provider === "outlook"}
-                onClick={() => setProvider("outlook")}
-              />
-            </div>
-          </div>
-
           <div className="space-y-1.5">
             <Label htmlFor="mail-domain">
               Email domain <span className="text-destructive">*</span>
@@ -197,8 +170,7 @@ export function StepMailProvider({
             </p>
           </div>
 
-          {provider === "gmail" && <GmailSetupCallout />}
-          {provider === "outlook" && <OutlookSetupCallout />}
+          <GmailSetupCallout />
 
           <ReadWriteDisclosure />
         </div>
@@ -216,37 +188,6 @@ export function StepMailProvider({
         </Button>
       </div>
     </div>
-  );
-}
-
-function ProviderCard({
-  label,
-  sub,
-  selected,
-  onClick,
-}: {
-  label: string;
-  sub: string;
-  selected: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cn(
-        "flex items-center gap-3 rounded-md border bg-card p-3 text-left transition-colors cursor-pointer",
-        selected
-          ? "border-[color:var(--brand-gold)] ring-2 ring-[color:var(--brand-gold)]/20"
-          : "border-border hover:border-primary/40",
-      )}
-    >
-      <Globe className="h-4 w-4 text-[color:var(--brand-gold)]" />
-      <div className="min-w-0">
-        <p className="text-sm font-semibold text-foreground">{label}</p>
-        <p className="text-xs text-muted-foreground">{sub}</p>
-      </div>
-    </button>
   );
 }
 
@@ -282,26 +223,6 @@ function GmailSetupCallout() {
       <p className="text-muted-foreground">
         Usually works in minutes; Google sometimes takes up to 24 hours to
         propagate the grant.
-      </p>
-    </div>
-  );
-}
-
-function OutlookSetupCallout() {
-  return (
-    <div className="rounded-md border border-border bg-card p-3 text-xs text-foreground space-y-2">
-      <p className="font-medium uppercase tracking-wide text-muted-foreground">
-        Microsoft 365 setup
-      </p>
-      <p className="leading-relaxed">
-        We&apos;ll send you to your Microsoft 365 admin&apos;s consent
-        screen after onboarding. Your tenant admin approves StrataWise to
-        send and read mail on behalf of managers , no extra steps required
-        beyond that single click.
-      </p>
-      <p className="text-muted-foreground">
-        Outlook connection ships behind a feature flag , we&apos;ll enable
-        it for your firm once your tenant admin completes consent.
       </p>
     </div>
   );

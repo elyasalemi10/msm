@@ -35,7 +35,7 @@ interface Props {
   /** Real mailbox addresses the manager can send from. Loaded server-side
    *  so the dialog opens instantly with no loading state. When there are
    *  2+ options the dialog renders a dropdown so the manager can pick
-   *  between e.g. their connected Outlook address and the noreply@
+   *  between e.g. their connected Gmail address and the noreply@
    *  StrataWise mailbox. */
   mailboxOptions: Array<{ value: string; label: string }>;
   open: boolean;

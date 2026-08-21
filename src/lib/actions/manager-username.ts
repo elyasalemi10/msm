@@ -40,42 +40,34 @@ export async function getSmsSenderId(): Promise<{ sender: string | null }> {
 
 /**
  * Returns every email inbox the signed-in manager could plausibly send
- * "from". Three sources:
+ * "from". Two sources:
  *   1. Their StrataWise default <username>@stratawise.com.au.
  *   2. Any Gmail mailbox subscriptions configured for their firm.
- *   3. Any Outlook mailbox subscriptions configured for their firm.
  *
  * The first entry in the returned array is the default selection (a
  * connected custom inbox if any, otherwise the StrataWise fallback).
  * Used by the lot communications "Send email" composer dropdown.
  */
-export async function listManagerInboxes(): Promise<Array<{ email: string; kind: "stratawise" | "gmail" | "outlook" }>> {
+export async function listManagerInboxes(): Promise<Array<{ email: string; kind: "stratawise" | "gmail" }>> {
   const profile = await requireCompanyRole();
   const supabase = createServerClient();
 
-  const [stratawise, { data: gmailSubs }, { data: outlookSubs }] = await Promise.all([
+  const [stratawise, { data: gmailSubs }] = await Promise.all([
     getManagerSendAddress(),
     supabase
       .from("gmail_mailbox_subscriptions")
       .select("mailbox_email")
       .eq("management_company_id", profile.management_company_id),
-    supabase
-      .from("outlook_mailbox_subscriptions")
-      .select("mailbox_email")
-      .eq("management_company_id", profile.management_company_id),
   ]);
 
-  const out: Array<{ email: string; kind: "stratawise" | "gmail" | "outlook" }> = [];
+  const out: Array<{ email: string; kind: "stratawise" | "gmail" }> = [];
   // Connected mailboxes first (the "custom" inboxes the user wants to default to).
   for (const row of (gmailSubs ?? []) as Array<{ mailbox_email: string }>) {
     if (row.mailbox_email) out.push({ email: row.mailbox_email, kind: "gmail" });
   }
-  for (const row of (outlookSubs ?? []) as Array<{ mailbox_email: string }>) {
-    if (row.mailbox_email) out.push({ email: row.mailbox_email, kind: "outlook" });
-  }
   if (stratawise.address) out.push({ email: stratawise.address, kind: "stratawise" });
 
-  // Dedupe (gmail + outlook could both list the same address).
+  // Dedupe.
   const seen = new Set<string>();
   return out.filter((o) => {
     const k = o.email.toLowerCase();

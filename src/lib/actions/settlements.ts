@@ -663,8 +663,7 @@ export async function applySettlementToLot(input: ApplySettlementInput) {
   // occupancy, tenant). Best-effort , failures are logged but don't
   // break the settlement.
   try {
-    // Addresses are stored as-is , PostGrid is no longer used to verify them
-    // (it's the print/mail product only now).
+    // Addresses are stored as-is. Address verification is not integrated.
     const postalVerificationStatus: string | null = null;
     const postalVerificationId: string | null = null;
     const postalVerifiedAt: string | null = null;

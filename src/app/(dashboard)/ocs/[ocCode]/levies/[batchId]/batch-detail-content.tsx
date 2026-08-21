@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   CheckCircle2, ChevronDown, Download, ExternalLink, Mail, Trash2, FolderDown,
-  Undo2, RefreshCw, AlertTriangle, Loader2, Send,
+  Undo2, RefreshCw, AlertTriangle, Loader2,
 } from "lucide-react";
 import { useSetBreadcrumb } from "@/lib/breadcrumb-context";
 import { format } from "date-fns";
@@ -30,7 +30,6 @@ import {
   cancelBatch,
   recallBatch,
   regenerateBatch,
-  sendBatchByPost,
   type LevyBatchDetail,
 } from "@/lib/actions/levy";
 import { useOCCode } from "@/lib/oc-context";
@@ -74,7 +73,6 @@ export function BatchDetailContent({
   const [downloadingZip, startDownload] = useTransition();
   const [cancelling, setCancelling] = useState(false);
   const [recalling, setRecalling] = useState(false);
-  const [posting, setPosting] = useState(false);
 
   // Per-row pending state
   const [sendingIds, setSendingIds] = useState<Set<string>>(new Set());
@@ -153,20 +151,6 @@ export function BatchDetailContent({
         levies: prev.levies.map((l) => ({ ...l, status: "draft" })),
       }));
     }
-  }
-
-  async function handleSendByPost() {
-    setPosting(true);
-    const result = await sendBatchByPost(ocId, batch.id);
-    setPosting(false);
-    if (result.error) {
-      toast.error(result.error);
-      return;
-    }
-    const banner = `${result.sentCount ?? 0} letter${result.sentCount === 1 ? "" : "s"} ${result.testMode ? "queued (test mode , no real mail)" : "posted"}${result.skippedCount ? ` · ${result.skippedCount} skipped (missing postal address)` : ""}`;
-    if (result.testMode) toast.success(banner);
-    else toast.success(banner);
-    router.refresh();
   }
 
   async function handleCancel() {
@@ -295,18 +279,6 @@ export function BatchDetailContent({
               >
                 {downloadingZip ? <Loader2 className="size-3.5 animate-spin" /> : <FolderDown className="size-3.5" />}
                 Download all
-              </button>
-              {/* PostGrid is wired but defaults to test mode , no real
-                  letters get printed until POSTGRID_LIVE=true. The toast
-                  will say "test mode" so managers know. */}
-              <button
-                type="button"
-                onClick={handleSendByPost}
-                disabled={posting}
-                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground hover:bg-muted cursor-pointer disabled:opacity-50"
-              >
-                {posting ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-                Send by post (test)
               </button>
               <button
                 type="button"

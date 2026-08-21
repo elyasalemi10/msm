@@ -89,7 +89,7 @@ const TYPE_COLORS: Record<string, string> = {
 // arrived via the Gmail webhook, so the Gmail glyph is what reflects "how it
 // got here." Sender-domain inference was misleading (a gmail-pushed reply
 // from joe@randomfirm.com was rendering as a generic mail icon).
-type Provider = "gmail" | "outlook" | null;
+type Provider = "gmail" | null;
 
 function ProviderIcon({
   provider,
@@ -102,9 +102,6 @@ function ProviderIcon({
   const klass = cn(size === "md" ? "size-5" : "size-3.5", "object-contain");
   if (provider === "gmail") {
     return <Image src="/logos/gmail.webp" alt="Gmail" width={px} height={px} className={klass} />;
-  }
-  if (provider === "outlook") {
-    return <Image src="/logos/outlook.webp" alt="Outlook" width={px} height={px} className={klass} />;
   }
   return <Mail className={cn(size === "md" ? "size-5" : "size-3.5", "text-muted-foreground")} />;
 }
@@ -156,7 +153,7 @@ export function InboxContent({
   allOwnerships,
 }: {
   notifications: Notification[];
-  rowProviders: Record<string, "gmail" | "outlook">;
+  rowProviders: Record<string, "gmail">;
   // Pre-fetched detail for the top N unread email_reply rows so opening
   // any of them is instant (no "Loading email…" flash). Anything not in
   // this map falls back to getInboxEmail() on demand.
@@ -577,9 +574,7 @@ function EmailDetailPane({
       ? `https://mail.google.com/mail/u/0/#inbox/${detail.gmail_message_id}`
       : provider === "gmail"
         ? `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(detail.sender_email)}`
-        : provider === "outlook"
-          ? `https://outlook.office.com/mail/0/${encodeURIComponent(detail.sender_email)}`
-          : null;
+        : null;
 
   return (
     <TooltipProvider delay={120}>
@@ -658,15 +653,11 @@ function EmailDetailPane({
                       />
                     }
                   >
-                    {provider === "gmail" ? (
-                      <Image src="/logos/gmail.webp" alt="" width={18} height={18} className="size-4 object-contain" />
-                    ) : (
-                      <Image src="/logos/outlook.webp" alt="" width={18} height={18} className="size-4 object-contain" />
-                    )}
-                    <span className="sr-only">Open in {provider === "gmail" ? "Gmail" : "Outlook"}</span>
+                    <Image src="/logos/gmail.webp" alt="" width={18} height={18} className="size-4 object-contain" />
+                    <span className="sr-only">Open in Gmail</span>
                   </TooltipTrigger>
                   <TooltipContent>
-                    Open the original in {provider === "gmail" ? "Gmail" : "Outlook"}.
+                    Open the original in Gmail.
                   </TooltipContent>
                 </Tooltip>
               )}
@@ -686,7 +677,7 @@ function EmailDetailPane({
                 </TooltipTrigger>
                 <TooltipContent>
                   Removes from your StrataWise inbox only , the original stays in
-                  {provider === "gmail" ? " Gmail" : provider === "outlook" ? " Outlook" : " your mailbox"}.
+                  {provider === "gmail" ? " Gmail" : " your mailbox"}.
                 </TooltipContent>
               </Tooltip>
             </div>
@@ -720,7 +711,7 @@ function EmailDetailPane({
             </p>
           </div>
 
-        {/* Body , markdown-rendered. Emails from Gmail/Outlook composers
+        {/* Body , markdown-rendered. Emails from Gmail composers
             usually arrive as plain text but commonly contain markdown
             (auto-quoted links, bullet lists, *bold*) that managers expect
             to read formatted. remark-gfm picks up tables, autolinks, and

@@ -5,7 +5,7 @@ import { createServerClient } from "@/lib/supabase";
 import { uploadObject } from "@/lib/storage/r2";
 import { applyAutoLinkToCommLog } from "@/lib/email/auto-link";
 
-// Same cap as the gmail/outlook handlers , anything bigger gets skipped
+// Same cap as the gmail handler , anything bigger gets skipped
 // (R2 single-object limit is 5 GB but we don't want a single inbound
 // owner upload to blow our storage budget).
 const MAX_INBOUND_ATTACHMENT_BYTES = 25 * 1024 * 1024;
@@ -227,7 +227,7 @@ export async function POST(request: NextRequest) {
   // subject / message_id / attachment list); the body and the attachment
   // bytes live behind separate calls. We pull both here so the rest of
   // the pipeline (communication_log insert + per-attachment R2 upload)
-  // looks identical to the gmail/outlook handlers downstream.
+  // looks identical to the gmail handler downstream.
   let body = d.text ?? stripHtml(d.html ?? "");
   const inboundEmailId = d.email_id ?? null;
   let fetchedHtml: string | null = null;
@@ -368,7 +368,7 @@ export async function POST(request: NextRequest) {
 
   // Auto-link by sender email when the thread-match cascade above
   // returned nothing. Single hit on the manager's portfolio → link
-  // silently with an audit_log entry; same shape as gmail / outlook.
+  // silently with an audit_log entry; same shape as gmail.
   if (!outboundOcId && sender) {
     try {
       await applyAutoLinkToCommLog(supabase, {

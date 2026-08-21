@@ -676,9 +676,9 @@ function SendEmailDrawer({
   const [body, setBody] = React.useState("");
   const [attachments, setAttachments] = React.useState<AttachmentDraft[]>([]);
   // Inbox dropdown , populated from listManagerInboxes(). Default
-  // selection is the first connected custom inbox (Gmail/Outlook) if
+  // selection is the first connected custom inbox (Gmail) if
   // any, otherwise the manager's StrataWise address.
-  const [inboxes, setInboxes] = React.useState<Array<{ email: string; kind: "stratawise" | "gmail" | "outlook" }>>(
+  const [inboxes, setInboxes] = React.useState<Array<{ email: string; kind: "stratawise" | "gmail" }>>(
     initialSenderAddress ? [{ email: initialSenderAddress, kind: "stratawise" }] : [],
   );
   const [selectedInbox, setSelectedInbox] = React.useState<string>(initialSenderAddress ?? "");

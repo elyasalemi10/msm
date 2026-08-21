@@ -28,21 +28,18 @@ const TYPE_COLORS: Record<string, string> = {
   system: "text-muted-foreground",
 };
 
-// Renders the provider glyph (Gmail/Outlook) for email_reply rows, falling
+// Renders the provider glyph (Gmail) for email_reply rows, falling
 // back to the type icon for everything else.
 function NotifIcon({
   type,
   provider,
 }: {
   type: string;
-  provider: "gmail" | "outlook" | null | undefined;
+  provider: "gmail" | null | undefined;
 }) {
   if (type === "email_reply") {
     if (provider === "gmail") {
       return <Image src="/logos/gmail.webp" alt="Gmail" width={16} height={16} className="size-4 object-contain" />;
-    }
-    if (provider === "outlook") {
-      return <Image src="/logos/outlook.webp" alt="Outlook" width={16} height={16} className="size-4 object-contain" />;
     }
   }
   const Icon = TYPE_ICONS[type] ?? Info;
@@ -83,7 +80,7 @@ export function NotificationBell() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [providers, setProviders] = useState<Record<string, "gmail" | "outlook">>({});
+  const [providers, setProviders] = useState<Record<string, "gmail">>({});
   const [unreadCount, setUnreadCount] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -105,7 +102,7 @@ export function NotificationBell() {
           setUnreadCount(count);
           setNotifications(rows);
           setLoaded(true);
-          // Resolve Gmail/Outlook provider for any email_reply rows so the
+          // Resolve the Gmail provider for any email_reply rows so the
           // dropdown shows the right glyph instead of the generic Mail icon.
           if (rows.some((r) => r.type === "email_reply")) {
             try {

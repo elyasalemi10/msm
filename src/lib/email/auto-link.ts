@@ -94,7 +94,7 @@ export async function applyAutoLinkToCommLog(
     communicationLogId: string;
     senderEmail: string;
     managerProfileId: string;
-    sourceChannel: "gmail" | "outlook" | "resend";
+    sourceChannel: "gmail" | "resend";
   },
 ): Promise<AutoLinkResult> {
   const result = await autoLinkBySenderEmail(supabase, {

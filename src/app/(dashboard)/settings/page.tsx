@@ -35,7 +35,6 @@ export default async function SettingsPage() {
     optOutAuditsResult,
     mailProviderResult,
     mailboxSubResult,
-    outlookSubResult,
     managerUsernameResult,
   ] = await Promise.all([
     isManager ? getCompanyData() : Promise.resolve(null),
@@ -68,13 +67,6 @@ export default async function SettingsPage() {
       : Promise.resolve({ data: null }),
     isManager
       ? supabase
-          .from("outlook_mailbox_subscriptions")
-          .select("mailbox_email, last_error")
-          .eq("manager_profile_id", profile.id)
-          .maybeSingle()
-      : Promise.resolve({ data: null }),
-    isManager
-      ? supabase
           .from("profiles")
           .select("email_username")
           .eq("id", profile.id)
@@ -83,8 +75,8 @@ export default async function SettingsPage() {
   ]);
 
   const mailRow = (mailProviderResult.data ?? null) as {
-    mail_provider: "stratawise" | "gmail" | "outlook";
-    mail_provider_config: { domain?: string; tenant_id?: string; admin_consent_at?: string } | null;
+    mail_provider: "stratawise" | "gmail";
+    mail_provider_config: { domain?: string } | null;
     mail_provider_configured_at: string | null;
   } | null;
   const mailProvider = {
@@ -92,7 +84,6 @@ export default async function SettingsPage() {
     domain: mailRow?.mail_provider_config?.domain ?? null,
     configured_at: mailRow?.mail_provider_configured_at ?? null,
   };
-  const outlookTenantId = mailRow?.mail_provider_config?.tenant_id ?? null;
 
   // Derive the manager's current mailbox prefix (the part before "@") from
   // their gmail_mailbox_subscriptions row, if any. Lets the Email tab
@@ -101,18 +92,11 @@ export default async function SettingsPage() {
   const subMailbox = subRow?.mailbox_email ?? null;
   const initialMailboxPrefix = subMailbox?.split("@")[0] ?? "";
 
-  // Same for Outlook so the prefix input pre-fills on revisit.
-  const outlookSubRow = (outlookSubResult.data as { mailbox_email: string | null; last_error: string | null } | null) ?? null;
-  const outlookMailbox = outlookSubRow?.mailbox_email ?? null;
-  const initialOutlookPrefix = outlookMailbox?.split("@")[0] ?? "";
-
   // Auth-shaped errors persisted by the gmail-push webhook (or watch-refresh
   // cron) indicate the Workspace admin revoked our DWD entry , surface a
   // banner so the manager knows to re-add it instead of silently going dark.
-  const gmailRevoked = !!subRow?.last_error && /unauthorized|invalid_grant|forbidden|401|403/i.test(subRow.last_error);
-  const outlookRevoked = !!outlookSubRow?.last_error && /unauthorized|invalid_client|forbidden|401|403/i.test(outlookSubRow.last_error);
-  const dwdRevoked = gmailRevoked || outlookRevoked;
-  const mailboxIntegrationError = subRow?.last_error ?? outlookSubRow?.last_error ?? null;
+  const dwdRevoked = !!subRow?.last_error && /unauthorized|invalid_grant|forbidden|401|403/i.test(subRow.last_error);
+  const mailboxIntegrationError = subRow?.last_error ?? null;
 
   // The always-on StrataWise alias every onboarded manager has ,
   // <email_username>@stratawise.com.au , used as the fallback when they
@@ -162,8 +146,6 @@ export default async function SettingsPage() {
       mailProvider={mailProvider}
       gmailOauthClientId={gmailOauthClientId}
       initialMailboxPrefix={initialMailboxPrefix}
-      initialOutlookPrefix={initialOutlookPrefix}
-      outlookTenantId={outlookTenantId}
       stratawiseFallbackEmail={stratawiseFallbackEmail}
       dwdRevoked={dwdRevoked}
       mailboxIntegrationError={mailboxIntegrationError}

@@ -787,7 +787,7 @@ function AutoSendCard({
   // enabled) or it's deleted. draft.enabled is hardcoded true at save
   // time so the cron picks it up. To turn it OFF the manager hits
   // "Delete automation".
-  // Mailbox default: prefer the connected (Gmail/Outlook) mailbox over
+  // Mailbox default: prefer the connected Gmail mailbox over
   // the StrataWise alias when both are present. mailboxOptions is
   // already ordered "connected first" by the server, so [0] is the
   // right default for new schedules.

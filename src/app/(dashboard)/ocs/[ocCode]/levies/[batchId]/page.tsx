@@ -39,7 +39,7 @@ export default async function BatchDetailPage({
   // expose real email addresses (never the provider name "Resend"
   // etc.) so the manager sees exactly the address the recipient will
   // see. Two sources:
-  //   1. The firm's connected mailbox (Gmail or Outlook send-as) , the
+  //   1. The firm's connected mailbox (Gmail send-as) , the
   //      primary manager's email under the firm's domain.
   //   2. The manager's permanent StrataWise alias
   //      (<email_username>@stratawise.com.au) , always available as a
@@ -74,9 +74,9 @@ export default async function BatchDetailPage({
     : null;
 
   const mailboxOptions: Array<{ value: string; label: string }> = [];
-  // Gmail/Outlook connected mailbox , surface the manager's real email
+  // Gmail connected mailbox , surface the manager's real email
   // when the firm has a provider configured.
-  if (mailRow?.mail_provider === "gmail" || mailRow?.mail_provider === "outlook") {
+  if (mailRow?.mail_provider === "gmail") {
     if (managerEmail) {
       mailboxOptions.push({ value: managerEmail, label: managerEmail });
     }

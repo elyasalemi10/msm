@@ -16,7 +16,7 @@ export default async function InboxPage() {
   const notifications = await getNotifications(50);
 
   // Three server-side enrichments in parallel:
-  //   1. provider hint for each row (Gmail / Outlook glyph)
+  //   1. provider hint for each row (Gmail glyph)
   //   2. full email body for the top 5 unread email_reply rows so the
   //      detail pane renders instantly the first time the manager clicks
   //      one (instead of flashing "Loading email…")

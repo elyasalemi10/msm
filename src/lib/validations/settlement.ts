@@ -31,9 +31,8 @@ export const applySettlementSchema = z.object({
       .min(1, "Postal address is required")
       .max(500),
     dateOfBirth: isoDate.nullable().optional().transform((v) => v || null),
-    // Set to true when the manager already ran PostGrid verification on
-    // the postal address through the AddressInput component , the server
-    // skips re-verification in that case, matching the lot-edit pattern.
+    // Legacy flag from the retired address-verification integration.
+    // Postal addresses are stored as the manager typed them.
     verifiedPostal: z.boolean().optional().default(false),
   }),
   settlementDate: isoDate,

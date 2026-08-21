@@ -378,7 +378,7 @@ export interface LotCommunicationRow {
   // that owner has an accepted portal profile with a picture).
   owner_name: string | null;
   owner_avatar_url: string | null;
-  // Inbound email attachments stored on R2 via the gmail/outlook/resend
+  // Inbound email attachments stored on R2 via the gmail/resend
   // push handlers. Empty for sent rows and non-email channels.
   attachments: LotCommunicationAttachment[];
 }

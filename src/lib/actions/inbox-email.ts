@@ -46,8 +46,7 @@ export interface InboxEmailDetail {
   lot_link_label: string | null;
   // Which transport delivered this inbound , "gmail" when the row came in
   // via the Pub/Sub gmail-push webhook (regardless of sender domain),
-  // "outlook" when Microsoft Graph ships, else null.
-  inbox_provider: "gmail" | "outlook" | null;
+  inbox_provider: "gmail" | null;
   // Gmail-internal ids stashed on the notification when ingested via
   // gmail-push, used to deep-link the "Open in Gmail" action straight to
   // the message instead of a search query.
@@ -107,14 +106,14 @@ export async function getInboxEmail(
   const notifMeta =
     ((notif as { metadata: Record<string, unknown> | null } | null)?.metadata) ?? {};
   const senderEmail = (notifMeta.sender_email as string | undefined) ?? "";
-  const metaProvider = notifMeta.provider as "gmail" | "outlook" | undefined;
+  const metaProvider = notifMeta.provider as "gmail" | undefined;
   const gmailMessageId = (notifMeta.gmail_message_id as string | undefined) ?? null;
   const gmailThreadId = (notifMeta.gmail_thread_id as string | undefined) ?? null;
 
   // Fallback provider resolution for rows ingested before we started
   // tagging notification metadata with provider/gmail_message_id ,
   // checks the inbound row's recipient against gmail_mailbox_subscriptions.
-  let inboxProvider: "gmail" | "outlook" | null = metaProvider ?? null;
+  let inboxProvider: "gmail" | null = metaProvider ?? null;
   if (!inboxProvider && row.recipient_email) {
     const { data: sub } = await supabase
       .from("gmail_mailbox_subscriptions")
@@ -442,7 +441,7 @@ export async function prefetchInboxEmails(
 
 // ─── Per-row provider hint for the inbox list ─────────────────────────
 //
-// Returns a Record<notificationId, "gmail" | "outlook"> for the email_reply
+// Returns a Record<notificationId, "gmail"> for the email_reply
 // notifications whose `metadata.provider` is set (newer rows) OR whose
 // underlying communication_log.recipient_email matches a row in
 // gmail_mailbox_subscriptions for the firm (backfill for older rows
@@ -455,15 +454,15 @@ export async function resolveInboxRowProviders(
     type: string;
     metadata: Record<string, unknown> | null;
   }>,
-): Promise<Record<string, "gmail" | "outlook">> {
-  const out: Record<string, "gmail" | "outlook"> = {};
+): Promise<Record<string, "gmail">> {
+  const out: Record<string, "gmail"> = {};
   const need: Array<{ id: string; commLogId: string }> = [];
 
   for (const n of notifications) {
     if (n.type !== "email_reply") continue;
     const meta = (n.metadata ?? {}) as Record<string, unknown>;
-    const tagged = meta.provider as "gmail" | "outlook" | undefined;
-    if (tagged === "gmail" || tagged === "outlook") {
+    const tagged = meta.provider as "gmail" | undefined;
+    if (tagged === "gmail") {
       out[n.id] = tagged;
       continue;
     }

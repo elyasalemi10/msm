@@ -26,20 +26,14 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { GmailSetupTutorial } from "@/components/shared/gmail-setup-tutorial";
-import {
-  saveGmailSetup,
-  disconnectMailProvider,
-  startOutlookConsent,
-  saveOutlookMailbox,
-} from "./actions";
+import { saveGmailSetup, disconnectMailProvider } from "./actions";
 
 // Settings → Email tab.
 //
 // Two visual modes:
 //   (A) "Connected" , provider logo, mailbox, sync state, Disconnect +
 //       Change-mailbox buttons. Shown whenever mail_provider !== stratawise
-//       AND a mailbox was saved (or in the case of gmail, even without one
-//       since the domain alone proves intent).
+//       AND a mailbox was saved.
 //   (B) "Wizard" , provider picker → domain → tutorial → prefix → Save.
 //       Shown when on stratawise (fallback) OR when the user clicks
 //       "Change mailbox" from the connected card.
@@ -49,7 +43,7 @@ import {
 // nothing else is required to make it work.
 
 export interface MailProviderConfig {
-  provider: "stratawise" | "gmail" | "outlook";
+  provider: "stratawise" | "gmail";
   domain: string | null;
   configured_at: string | null;
 }
@@ -58,8 +52,6 @@ export function EmailTab({
   initial,
   oauthClientId,
   initialMailboxPrefix,
-  initialOutlookPrefix,
-  outlookTenantId,
   stratawiseFallbackEmail,
   dwdRevoked,
   mailboxIntegrationError,
@@ -67,11 +59,6 @@ export function EmailTab({
   initial: MailProviderConfig;
   oauthClientId: string | null;
   initialMailboxPrefix: string;
-  initialOutlookPrefix: string;
-  // Non-null when the firm's Microsoft 365 admin has already granted
-  // consent. Drives the Outlook wizard between "Connect Microsoft 365" and
-  // "Enter mailbox prefix" states.
-  outlookTenantId: string | null;
   // The manager's <username>@stratawise.com.au alias (always present once
   // they've onboarded). Used as the read-out for "your fallback address".
   stratawiseFallbackEmail: string;
@@ -86,36 +73,14 @@ export function EmailTab({
   // part of the mailbox they're authorising. The saved prefix still
   // shows in the connected-view read-out (savedMailbox) below.
   const [mailboxPrefix, setMailboxPrefix] = useState("");
-  const [savedMailbox, setSavedMailbox] = useState<string | null>(() => {
-    const prefix = initial.provider === "outlook" ? initialOutlookPrefix : initialMailboxPrefix;
-    return prefix && initial.domain ? `${prefix}@${initial.domain}` : null;
-  });
-  const [editing, setEditing] = useState(
-    (initial.provider === "gmail" && !initialMailboxPrefix) ||
-      (initial.provider === "outlook" && !initialOutlookPrefix),
+  const [savedMailbox, setSavedMailbox] = useState<string | null>(() =>
+    initialMailboxPrefix && initial.domain
+      ? `${initialMailboxPrefix}@${initial.domain}`
+      : null,
   );
-
-  // Surface Microsoft-consent callback flags (?outlook_consent=granted or
-  // ?outlook_error=...) as toasts so the manager knows whether the
-  // round-trip succeeded. The callback already sets mail_provider_config
-  // server-side; we just need to acknowledge it in the UI.
-  const searchParams = useSearchParams();
-  useEffect(() => {
-    const consent = searchParams.get("outlook_consent");
-    const err = searchParams.get("outlook_error");
-    if (consent === "granted") {
-      toast.success("Microsoft 365 consent granted , enter your mailbox prefix to finish.");
-      setEditing(true);
-      const next = new URLSearchParams(searchParams.toString());
-      next.delete("outlook_consent");
-      window.history.replaceState(null, "", `/settings?${next.toString()}`);
-    } else if (err) {
-      toast.error(`Microsoft consent failed: ${err.replace(/_/g, " ")}`);
-      const next = new URLSearchParams(searchParams.toString());
-      next.delete("outlook_error");
-      window.history.replaceState(null, "", `/settings?${next.toString()}`);
-    }
-  }, [searchParams]);
+  const [editing, setEditing] = useState(
+    initial.provider === "gmail" && !initialMailboxPrefix,
+  );
 
   if (!editing && config.provider !== "stratawise") {
     return (
@@ -154,7 +119,6 @@ export function EmailTab({
       config={config}
       mailboxPrefix={mailboxPrefix}
       oauthClientId={oauthClientId}
-      outlookTenantId={outlookTenantId}
       stratawiseFallbackEmail={stratawiseFallbackEmail}
       onMailboxPrefixChange={setMailboxPrefix}
       onProviderChange={(provider, domain) =>
@@ -205,18 +169,9 @@ function ConnectedView({
     onDisconnected();
   }
 
-  const providerLogo =
-    config.provider === "gmail"
-      ? "/logos/gmail.webp"
-      : config.provider === "outlook"
-        ? "/logos/outlook.webp"
-        : null;
+  const providerLogo = config.provider === "gmail" ? "/logos/gmail.webp" : null;
   const providerLabel =
-    config.provider === "gmail"
-      ? "Gmail · Google Workspace"
-      : config.provider === "outlook"
-        ? "Outlook · Microsoft 365"
-        : "StrataWise";
+    config.provider === "gmail" ? "Gmail · Google Workspace" : "StrataWise";
 
   return (
     <div className="space-y-4">
@@ -317,7 +272,7 @@ function StratawiseDefaultView({
 
         <div className="rounded-md border border-border bg-cool-muted p-3 text-xs text-muted-foreground">
           Want owners to see your firm&apos;s own domain instead? Connect a
-          Gmail or Outlook mailbox under your firm. We only{" "}
+          Gmail mailbox under your firm. We only{" "}
           <span className="font-medium text-foreground">read</span> and{" "}
           <span className="font-medium text-foreground">send</span> , we never
           delete anything.
@@ -339,7 +294,6 @@ function Wizard({
   config,
   mailboxPrefix,
   oauthClientId,
-  outlookTenantId,
   stratawiseFallbackEmail,
   onMailboxPrefixChange,
   onProviderChange,
@@ -349,11 +303,10 @@ function Wizard({
   config: MailProviderConfig;
   mailboxPrefix: string;
   oauthClientId: string | null;
-  outlookTenantId: string | null;
   stratawiseFallbackEmail: string;
   onMailboxPrefixChange: (v: string) => void;
   onProviderChange: (provider: MailProviderConfig["provider"], domain?: string | null) => void;
-  onSaved: (mailbox: string, domain: string, provider: "gmail" | "outlook") => void;
+  onSaved: (mailbox: string, domain: string, provider: "gmail") => void;
   onCancel?: () => void;
 }) {
   const [provider, setProvider] = useState<MailProviderConfig["provider"]>(
@@ -361,13 +314,7 @@ function Wizard({
   );
   const [domain, setDomain] = useState(config.domain ?? "");
   const [pending, setPending] = useState(false);
-  const [consentPending, setConsentPending] = useState(false);
   const [errorResult, setErrorResult] = useState<{ message: string; reason?: string } | null>(null);
-
-  // Outlook is a two-leg flow: admin consent (sets tenant_id) then save
-  // mailbox. We've already granted consent once the server reports a
-  // tenant_id on mail_provider_config.
-  const outlookConsentGranted = !!outlookTenantId;
 
   const mailboxPreview = useMemo(() => {
     const p = mailboxPrefix.trim().toLowerCase();
@@ -385,26 +332,6 @@ function Wizard({
       .replace(/\/.*$/, "");
   }
 
-  async function handleConnectMicrosoft() {
-    const cleanDomain = sanitizeDomain(domain);
-    if (!cleanDomain) {
-      toast.error("Enter your firm's email domain first.");
-      return;
-    }
-    setConsentPending(true);
-    const res = await startOutlookConsent({ domain: cleanDomain });
-    setConsentPending(false);
-    if ("error" in res && res.error) {
-      toast.error(res.error);
-      return;
-    }
-    if ("consentUrl" in res && res.consentUrl) {
-      // The server action already set an httpOnly CSRF cookie , just kick
-      // the browser to Microsoft's admin-consent screen.
-      window.location.href = res.consentUrl;
-    }
-  }
-
   async function handleSave() {
     const cleanDomain = sanitizeDomain(domain);
     if (!cleanDomain) {
@@ -415,27 +342,8 @@ function Wizard({
       toast.error("Enter your mailbox prefix (the part before the @).");
       return;
     }
-    if (provider === "outlook" && !mailboxPrefix.trim()) {
-      toast.error("Enter your mailbox prefix (the part before the @).");
-      return;
-    }
     setPending(true);
     setErrorResult(null);
-
-    if (provider === "outlook") {
-      const res = await saveOutlookMailbox({ mailboxPrefix: mailboxPrefix.trim() });
-      setPending(false);
-      if ("error" in res && res.error) {
-        setErrorResult({ message: res.error, reason: (res as { reason?: string }).reason });
-        toast.error(res.error);
-        return;
-      }
-      if ("mailbox" in res && res.mailbox) {
-        toast.success("Outlook mailbox connected");
-        onSaved(res.mailbox, cleanDomain, "outlook");
-      }
-      return;
-    }
 
     onProviderChange(provider, cleanDomain);
     const res = await saveGmailSetup({
@@ -474,20 +382,13 @@ function Wizard({
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3">
             <ProviderTile
               label="Gmail"
               sub="Google Workspace"
               logo="/logos/gmail.webp"
               selected={provider === "gmail"}
               onClick={() => setProvider("gmail")}
-            />
-            <ProviderTile
-              label="Outlook"
-              sub="Microsoft 365"
-              logo="/logos/outlook.webp"
-              selected={provider === "outlook"}
-              onClick={() => setProvider("outlook")}
             />
           </div>
 
@@ -550,18 +451,6 @@ function Wizard({
             </>
           )}
 
-          {provider === "outlook" && (
-            <OutlookConnect
-              tenantConsented={outlookConsentGranted}
-              domain={sanitizeDomain(domain)}
-              mailboxPrefix={mailboxPrefix}
-              onMailboxPrefixChange={onMailboxPrefixChange}
-              onConnectMicrosoft={handleConnectMicrosoft}
-              consentPending={consentPending}
-              mailboxPreview={mailboxPreview}
-            />
-          )}
-
           <ReadWriteDisclosure stratawiseFallbackEmail={stratawiseFallbackEmail} />
 
           {errorResult && (
@@ -583,14 +472,10 @@ function Wizard({
                 Cancel
               </Button>
             )}
-            {/* Outlook hides Save until admin consent is granted , the
-                inline OutlookConnect block owns that leg of the flow. */}
-            {!(provider === "outlook" && !outlookConsentGranted) && (
-              <Button size="sm" onClick={handleSave} disabled={pending}>
-                {pending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                Save
-              </Button>
-            )}
+            <Button size="sm" onClick={handleSave} disabled={pending}>
+              {pending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+              Save
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -631,106 +516,6 @@ function ProviderTile({
         <p className="text-xs text-muted-foreground">{sub}</p>
       </div>
     </button>
-  );
-}
-
-function OutlookConnect({
-  tenantConsented,
-  domain,
-  mailboxPrefix,
-  onMailboxPrefixChange,
-  onConnectMicrosoft,
-  consentPending,
-  mailboxPreview,
-}: {
-  tenantConsented: boolean;
-  domain: string;
-  mailboxPrefix: string;
-  onMailboxPrefixChange: (v: string) => void;
-  onConnectMicrosoft: () => void;
-  consentPending: boolean;
-  mailboxPreview: string;
-}) {
-  // Two-leg flow:
-  //   (1) Pre-consent: admin clicks "Connect Microsoft 365" → redirected to
-  //       login.microsoftonline.com/adminconsent → callback drops tenant_id
-  //       on management_companies.mail_provider_config.
-  //   (2) Post-consent: admin enters the mailbox prefix to actually send
-  //       and subscribe as. saveOutlookMailbox tests Mail.Send + creates
-  //       the Graph change-notification subscription.
-  if (!tenantConsented) {
-    return (
-      <div className="space-y-3 rounded-md border border-border bg-cool-muted p-4 text-sm">
-        <div className="space-y-1">
-          <p className="font-medium text-foreground">
-            Step 1 , Authorise StrataWise in Microsoft 365
-          </p>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            We&apos;ll redirect you to your Microsoft 365 admin consent screen.
-            Approve the <span className="font-mono">Mail.Send</span> and{" "}
-            <span className="font-mono">Mail.ReadWrite</span> permissions, then
-            you&apos;ll be brought back here to finish setup.
-          </p>
-        </div>
-        <div>
-          <Button size="sm" onClick={onConnectMicrosoft} disabled={consentPending || !domain}>
-            {consentPending ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            Connect Microsoft 365
-          </Button>
-          {!domain && (
-            <p className="mt-2 text-xs text-muted-foreground">
-              Enter your firm&apos;s domain above first.
-            </p>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-start gap-2 rounded-md border border-[hsl(160,80%,40%)]/30 bg-[hsl(160,80%,40%)]/5 p-3 text-xs">
-        <CheckCircle2 className="h-4 w-4 shrink-0 mt-0.5 text-[hsl(160,100%,28%)]" />
-        <div>
-          <p className="font-medium text-foreground">
-            Microsoft 365 admin consent granted
-          </p>
-          <p className="mt-0.5 text-muted-foreground">
-            StrataWise can now send and read mail in your tenant. Last step ,
-            tell us which mailbox to use.
-          </p>
-        </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="outlook-mailbox-prefix">
-          Step 2 , Your mailbox prefix <span className="text-destructive">*</span>
-        </Label>
-        <div className="flex items-center gap-1">
-          <Input
-            id="outlook-mailbox-prefix"
-            value={mailboxPrefix}
-            onChange={(e) => onMailboxPrefixChange(e.target.value)}
-            placeholder="Mailbox prefix"
-            className="w-44"
-          />
-          <span className="text-sm text-muted-foreground whitespace-nowrap">
-            @{domain || "yourfirm.com.au"}
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Outbound sends will come from{" "}
-          <span className="font-mono">
-            {mailboxPreview || "yourname@yourfirm.com.au"}
-          </span>
-          .
-        </p>
-      </div>
-    </div>
   );
 }
 

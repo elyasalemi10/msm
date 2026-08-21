@@ -38,8 +38,6 @@ function TabsInner({
   mailProvider,
   gmailOauthClientId,
   initialMailboxPrefix,
-  initialOutlookPrefix,
-  outlookTenantId,
   stratawiseFallbackEmail,
   dwdRevoked,
   mailboxIntegrationError,
@@ -52,8 +50,6 @@ function TabsInner({
   mailProvider: MailProviderConfig;
   gmailOauthClientId: string | null;
   initialMailboxPrefix: string;
-  initialOutlookPrefix: string;
-  outlookTenantId: string | null;
   stratawiseFallbackEmail: string;
   dwdRevoked: boolean;
   mailboxIntegrationError: string | null;
@@ -122,8 +118,6 @@ function TabsInner({
               initial={mailProvider}
               oauthClientId={gmailOauthClientId}
               initialMailboxPrefix={initialMailboxPrefix}
-              initialOutlookPrefix={initialOutlookPrefix}
-              outlookTenantId={outlookTenantId}
               stratawiseFallbackEmail={stratawiseFallbackEmail}
               dwdRevoked={dwdRevoked}
               mailboxIntegrationError={mailboxIntegrationError}
@@ -144,8 +138,6 @@ export function SettingsTabs({
   mailProvider,
   gmailOauthClientId,
   initialMailboxPrefix,
-  initialOutlookPrefix,
-  outlookTenantId,
   stratawiseFallbackEmail,
   dwdRevoked,
   mailboxIntegrationError,
@@ -158,8 +150,6 @@ export function SettingsTabs({
   mailProvider: MailProviderConfig;
   gmailOauthClientId: string | null;
   initialMailboxPrefix: string;
-  initialOutlookPrefix: string;
-  outlookTenantId: string | null;
   stratawiseFallbackEmail: string;
   dwdRevoked: boolean;
   mailboxIntegrationError: string | null;
@@ -175,8 +165,6 @@ export function SettingsTabs({
         mailProvider={mailProvider}
         gmailOauthClientId={gmailOauthClientId}
         initialMailboxPrefix={initialMailboxPrefix}
-        initialOutlookPrefix={initialOutlookPrefix}
-        outlookTenantId={outlookTenantId}
         stratawiseFallbackEmail={stratawiseFallbackEmail}
         dwdRevoked={dwdRevoked}
         mailboxIntegrationError={mailboxIntegrationError}

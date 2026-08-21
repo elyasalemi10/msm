@@ -163,7 +163,7 @@ export async function uploadCompanySignature(formData: FormData): Promise<{ url?
 //
 // Validation:
 //   - admin role required
-//   - domain required when provider=gmail/outlook
+//   - domain required when provider=gmail
 //   - prefix required when provider=gmail (used as sender mailbox + tested)
 //   - prefix must be a valid local-part (letters, digits, dot, dash, underscore)
 //
@@ -172,7 +172,7 @@ export async function uploadCompanySignature(formData: FormData): Promise<{ url?
 //   { error, reason? }                     on test failure (so the UI can
 //                                          show the verbatim DWD reason)
 interface SaveGmailSetupInput {
-  provider: "stratawise" | "gmail" | "outlook";
+  provider: "stratawise" | "gmail";
   domain: string | null;
   mailboxPrefix: string | null;
 }
@@ -291,197 +291,6 @@ export async function saveGmailSetup(input: SaveGmailSetupInput) {
   };
 }
 
-// ─── Outlook (Microsoft Graph) setup ─────────────────────────────────
-// Multi-step:
-//   1. /settings → Email tab → admin pastes firm domain + clicks
-//      "Connect Microsoft 365" , startOutlookConsent() generates the
-//      admin-consent URL with a CSRF state cookie.
-//   2. Admin opens URL in browser → grants consent → Microsoft redirects
-//      to /api/outlook/consent-callback which stores the tenant_id on
-//      management_companies.mail_provider_config.
-//   3. Admin returns to /settings → enters prefix → saveOutlookMailbox()
-//      tests via Graph + creates the subscription + persists the
-//      outlook_mailbox_subscriptions row.
-
-interface StartOutlookConsentInput {
-  domain: string;
-}
-
-export async function startOutlookConsent(input: StartOutlookConsentInput) {
-  const profile = await getCurrentProfile();
-  if (!profile || !profile.management_company_id) {
-    return { error: "Not authenticated" };
-  }
-  if (profile.company_role !== "admin") {
-    return { error: "Only company admins can change this." };
-  }
-  const clientId = process.env.OUTLOOK_CLIENT_ID;
-  if (!clientId) {
-    return { error: "Outlook integration isn't configured on the platform yet." };
-  }
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "");
-  if (!appUrl) {
-    return { error: "App URL isn't configured (NEXT_PUBLIC_APP_URL)." };
-  }
-
-  const domain = input.domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "");
-  if (!domain || !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain)) {
-    return { error: "Enter your firm's email domain (e.g. acmestrata.com.au)." };
-  }
-
-  // Persist the domain on mail_provider_config NOW so when the admin
-  // returns from Microsoft the prefix step has it ready.
-  const supabase = createServerClient();
-  const { data: company } = await supabase
-    .from("management_companies")
-    .select("mail_provider_config")
-    .eq("id", profile.management_company_id)
-    .maybeSingle();
-  const existingConfig = (company?.mail_provider_config ?? {}) as Record<string, unknown>;
-  await supabase
-    .from("management_companies")
-    .update({
-      mail_provider_config: { ...existingConfig, domain },
-    })
-    .eq("id", profile.management_company_id);
-
-  // CSRF state cookie , verified on the callback. Random 32-byte hex.
-  // Set httpOnly here in the server action so the cookie can't be read by
-  // the browser; the callback only needs to compare it against the state
-  // querystring Microsoft echoes back.
-  const state = crypto.randomUUID().replace(/-/g, "");
-  const cookieStore = await cookies();
-  cookieStore.set("outlook_consent_state", state, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    path: "/",
-    maxAge: 60 * 15,
-  });
-  const redirectUri = `${appUrl}/api/outlook/consent-callback`;
-  const consentUrl =
-    `https://login.microsoftonline.com/organizations/adminconsent?` +
-    new URLSearchParams({
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      state,
-    }).toString();
-
-  return { ok: true as const, consentUrl, state };
-}
-
-interface SaveOutlookMailboxInput {
-  mailboxPrefix: string;
-}
-
-export async function saveOutlookMailbox(input: SaveOutlookMailboxInput) {
-  const profile = await getCurrentProfile();
-  if (!profile || !profile.management_company_id) {
-    return { error: "Not authenticated" };
-  }
-  if (profile.company_role !== "admin") {
-    return { error: "Only company admins can change this." };
-  }
-  const prefix = input.mailboxPrefix.trim().toLowerCase();
-  if (!prefix || !/^[a-z0-9._-]+$/.test(prefix)) {
-    return { error: "Prefix can only contain letters, digits, dot, dash or underscore." };
-  }
-
-  const supabase = createServerClient();
-  const { data: company } = await supabase
-    .from("management_companies")
-    .select("mail_provider_config")
-    .eq("id", profile.management_company_id)
-    .maybeSingle();
-  const cfg = (company?.mail_provider_config ?? {}) as { domain?: string; tenant_id?: string };
-  if (!cfg.domain || !cfg.tenant_id) {
-    return {
-      error: cfg.tenant_id
-        ? "Firm domain missing , paste it first and try again."
-        : "Microsoft admin consent missing , click Connect Microsoft 365 first.",
-    };
-  }
-  const mailbox = `${prefix}@${cfg.domain}`;
-
-  const {
-    testOutlookConnection,
-    createOutlookSubscription,
-  } = await import("@/lib/outlook/graph-client");
-
-  const test = await testOutlookConnection(cfg.tenant_id, mailbox);
-  if (!test.ok) {
-    return { error: humaniseGraphError(test.error, test.reason, mailbox), reason: test.reason };
-  }
-
-  // Try to create a change-notification subscription. Best-effort , if
-  // it fails we still save the mailbox so outbound works.
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
-  const notificationUrl = appUrl
-    ? `${appUrl}/api/webhooks/outlook-push`
-    : "";
-  const clientState = process.env.OUTLOOK_PUSH_CLIENT_STATE ?? "stratawise-outlook";
-  let subInfo: { subscriptionId: string; expiresAt: string } | null = null;
-  let subError: string | null = null;
-  if (notificationUrl) {
-    const sub = await createOutlookSubscription(cfg.tenant_id, mailbox, notificationUrl, clientState);
-    if (sub.ok) {
-      subInfo = { subscriptionId: sub.subscriptionId, expiresAt: sub.expiresAt };
-    } else {
-      subError = sub.error;
-      console.error("saveOutlookMailbox: subscription create failed for", mailbox, ":", sub.error);
-    }
-  }
-
-  // Set mail_provider=outlook + upsert the subscription row.
-  await supabase
-    .from("management_companies")
-    .update({
-      mail_provider: "outlook",
-      mail_provider_configured_at: new Date().toISOString(),
-      mail_provider_configured_by: profile.id,
-    })
-    .eq("id", profile.management_company_id);
-
-  await supabase
-    .from("outlook_mailbox_subscriptions")
-    .upsert(
-      {
-        management_company_id: profile.management_company_id,
-        mailbox_email: mailbox,
-        tenant_id: cfg.tenant_id,
-        manager_profile_id: profile.id,
-        subscription_id: subInfo?.subscriptionId ?? null,
-        expires_at: subInfo?.expiresAt ?? null,
-        last_renewed_at: subInfo ? new Date().toISOString() : null,
-        last_error: subError,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "management_company_id,mailbox_email" },
-    );
-
-  return {
-    ok: true as const,
-    mailbox,
-    displayName: test.displayName,
-    subscribing: !!subInfo,
-    subError: subError ?? undefined,
-  };
-}
-
-function humaniseGraphError(rawMessage: string, reason: string | null, mailbox: string): string {
-  const blob = `${rawMessage} ${reason ?? ""}`.toLowerCase();
-  if (blob.includes("resource not found") || blob.includes("not_found") || blob.includes("requesteduser")) {
-    return `We couldn't find ${mailbox} in your Microsoft 365 tenant. Check the prefix matches a real mailbox.`;
-  }
-  if (blob.includes("unauthorized") || blob.includes("invalid_client")) {
-    return `Microsoft admin consent looks incomplete , try clicking Connect Microsoft 365 again.`;
-  }
-  if (blob.includes("forbidden") || blob.includes("authorization")) {
-    return `StrataWise is consented but is missing Mail.Send / Mail.ReadWrite permissions. Re-grant consent.`;
-  }
-  return `Outlook couldn't reach ${mailbox}. ${rawMessage}`;
-}
-
 export async function disconnectMailProvider() {
   const profile = await getCurrentProfile();
   if (!profile || !profile.management_company_id) {
@@ -523,35 +332,6 @@ export async function disconnectMailProvider() {
     );
     await supabase
       .from("gmail_mailbox_subscriptions")
-      .delete()
-      .eq("management_company_id", profile.management_company_id);
-  }
-
-  // Same teardown for Outlook subscriptions , DELETE the Graph
-  // subscription so notifications stop, then drop the row.
-  const { data: outlookSubs } = await supabase
-    .from("outlook_mailbox_subscriptions")
-    .select("id, tenant_id, subscription_id")
-    .eq("management_company_id", profile.management_company_id);
-  const outlookRows = (outlookSubs ?? []) as Array<{
-    id: string;
-    tenant_id: string;
-    subscription_id: string | null;
-  }>;
-  if (outlookRows.length > 0) {
-    const { stopOutlookSubscription } = await import("@/lib/outlook/graph-client");
-    await Promise.all(
-      outlookRows.map(async (s) => {
-        if (!s.subscription_id) return;
-        try {
-          await stopOutlookSubscription(s.tenant_id, s.subscription_id);
-        } catch (err) {
-          console.warn("disconnectMailProvider: stop outlook subscription failed", err);
-        }
-      }),
-    );
-    await supabase
-      .from("outlook_mailbox_subscriptions")
       .delete()
       .eq("management_company_id", profile.management_company_id);
   }

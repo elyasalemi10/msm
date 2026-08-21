@@ -104,8 +104,8 @@ function isDryRun(): boolean {
 //   provider=gmail + JSON key present + we can resolve a sender mailbox
 //     under the firm's domain → sendViaGmail (returns RFC822 Message-ID)
 //   any retryable Gmail failure (rate limit after 1s retry) OR mailbox
-//     can't be resolved OR provider=outlook (transport pending) OR
-//     provider=stratawise → fall through to Resend with the caller's
+//     can't be resolved OR provider=stratawise → fall through to Resend
+//     with the caller's
 //     `resendFrom` (a "Name <addr>" header).
 //
 // The "from-resolution" responsibility stays with the caller: we want each
@@ -142,7 +142,7 @@ async function transportSend(
 
   // Honour an explicit stratawise.com.au sender override (the manager
   // picked their stratawise alias / noreply in the send-emails dropdown).
-  // Skip the Gmail/Outlook providers entirely and go straight to Resend,
+  // Skip the Gmail provider entirely and go straight to Resend,
   // which holds the verified DKIM/SPF for stratawise.com.au. Without
   // this short-circuit the connected Gmail mailbox always wins, so the
   // dropdown choice had no effect.
@@ -186,43 +186,6 @@ async function transportSend(
           dispatch.domain,
           ", falling back to Resend.",
         );
-      }
-    }
-    // Outlook send-as path. Requires the customer admin to have
-    // granted consent (tenant_id stored on mail_provider_config) and
-    // a confirmed mailbox row in outlook_mailbox_subscriptions.
-    if (dispatch.provider === "outlook" && dispatch.tenantId) {
-      const { sendViaOutlook, isOutlookConfigured } = await import(
-        "@/lib/outlook/graph-client"
-      );
-      if (isOutlookConfigured()) {
-        const supabase = createServerClient();
-        const { data: sub } = await supabase
-          .from("outlook_mailbox_subscriptions")
-          .select("mailbox_email")
-          .eq("manager_profile_id", managerProfileId)
-          .maybeSingle();
-        const mailbox = (sub as { mailbox_email: string | null } | null)?.mailbox_email;
-        if (mailbox) {
-          const result = await sendViaOutlook({
-            tenantId: dispatch.tenantId,
-            mailbox,
-            to,
-            subject,
-            htmlBody: html,
-            attachments,
-          });
-          if (result.ok) {
-            // Graph's sendMail returns 202 with no body , no RFC822
-            // id we can capture synchronously. Inbound matching for
-            // Outlook will fall back to subject + sender heuristics.
-            return { data: { id: "" }, error: null };
-          }
-          if (!result.retryable) {
-            return { data: null, error: { message: result.error } };
-          }
-          console.warn("[email] Outlook rate-limited after retry, falling back to Resend.");
-        }
       }
     }
   }
@@ -1597,8 +1560,6 @@ export async function sendManagerMessageEmail(params: {
   // Dispatch based on the manager's company mail_provider:
   //   stratawise → Resend transport, FROM <username>@stratawise.com.au
   //   gmail      → Gmail API via DWD impersonation (real transport below)
-  //   outlook    → Microsoft Graph (transport pending , falls through to
-  //                Resend for now with a console.warn)
   const dispatch = await resolveDispatchProvider(managerProfileId);
 
   const htmlBodyEscaped = escapeHtml(bodyText).replace(/\r?\n/g, "<br />");
@@ -1660,12 +1621,6 @@ export async function sendManagerMessageEmail(params: {
     }
   }
 
-  if (dispatch.provider === "outlook") {
-    console.warn(
-      `[email] outlook send-as configured for company ${dispatch.companyId} but Microsoft Graph transport hasn't shipped yet , falling back to Resend.`,
-    );
-  }
-
   const from = (await resolveManagerFromHeader(managerProfileId)) ?? noreplyFrom();
 
   // Plain, left-aligned email body. We escape HTML to neutralise injection
@@ -1694,10 +1649,9 @@ export async function sendManagerMessageEmail(params: {
 // management_companies.mail_provider. Falls back to stratawise on lookup
 // failure so outbound mail never silently breaks.
 interface MailDispatch {
-  provider: "stratawise" | "gmail" | "outlook";
+  provider: "stratawise" | "gmail";
   companyId: string | null;
   domain: string | null;
-  tenantId: string | null;
 }
 
 // For a Gmail-routed send, the FROM mailbox MUST be a real Workspace mailbox
@@ -1813,7 +1767,7 @@ async function resolveDispatchProvider(
       (profile as { management_company_id: string | null } | null)
         ?.management_company_id ?? null;
     if (!companyId) {
-      return { provider: "stratawise", companyId: null, domain: null, tenantId: null };
+      return { provider: "stratawise", companyId: null, domain: null };
     }
     const { data: company } = await supabase
       .from("management_companies")
@@ -1821,17 +1775,16 @@ async function resolveDispatchProvider(
       .eq("id", companyId)
       .maybeSingle();
     const row = company as {
-      mail_provider: "stratawise" | "gmail" | "outlook" | null;
-      mail_provider_config: { domain?: string; tenant_id?: string } | null;
+      mail_provider: "stratawise" | "gmail" | null;
+      mail_provider_config: { domain?: string } | null;
     } | null;
     return {
       provider: row?.mail_provider ?? "stratawise",
       companyId,
       domain: row?.mail_provider_config?.domain ?? null,
-      tenantId: row?.mail_provider_config?.tenant_id ?? null,
     };
   } catch (err) {
     console.error("[email] resolveDispatchProvider failed:", err);
-    return { provider: "stratawise", companyId: null, domain: null, tenantId: null };
+    return { provider: "stratawise", companyId: null, domain: null };
   }
 }

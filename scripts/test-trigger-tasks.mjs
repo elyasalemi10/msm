@@ -5,7 +5,7 @@
 //   TRIGGER_SECRET_KEY=tr_prod_XXXX node scripts/test-trigger-tasks.mjs
 //
 // or (target only one task):
-//   TRIGGER_SECRET_KEY=tr_prod_XXXX node scripts/test-trigger-tasks.mjs outlook-subscription-refresh
+//   TRIGGER_SECRET_KEY=tr_prod_XXXX node scripts/test-trigger-tasks.mjs gmail-watch-refresh
 //
 // The key MUST be the environment-scoped secret key from the Trigger.dev
 // dashboard (Settings → API keys → Production → Secret key, format
@@ -23,7 +23,6 @@ const ALL_TASKS = [
   "daily-accrue-interest",
   "daily-check-overdue-levies",
   "gmail-watch-refresh",
-  "outlook-subscription-refresh",
   "sweep-pending-ocr",
 ];
 

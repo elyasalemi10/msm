@@ -261,14 +261,14 @@ export async function sendInvitations(invites: { email: string; name: string }[]
 }
 
 // ─── Step 3: Mail provider ────────────────────────────────────────────────
-// Sets the company's mail_provider. For gmail/outlook we ALSO stash a
+// Sets the company's mail_provider. For gmail we ALSO stash a
 // domain into mail_provider_config so the dispatcher knows which mailbox
 // to impersonate when sending. Customers can change or disconnect from
 // /settings later , disconnecting falls back to 'stratawise' with
 // `<email_username>@stratawise.com.au`.
 
 interface SaveMailProviderInput {
-  provider: "stratawise" | "gmail" | "outlook";
+  provider: "stratawise" | "gmail";
   domain?: string | null;
 }
 
