@@ -148,10 +148,49 @@ const REVALIDATE_INTERVAL_MS = 30_000;
 /** Backstop on a refresh that never reports finishing. */
 const REFRESH_FAILSAFE_MS = 15_000;
 
-/** Routes where a background refresh is pointless or unwelcome: multi-step
- *  wizards and long-form editors own their state client-side, and the auth
- *  screens have nothing to re-fetch. */
-const SKIP_REVALIDATE = ["/ocs/new", "/admin/blog/", "/onboarding", "/sign-in", "/sign-up", "/invite/"];
+// Caching and the bar apply to the APP only. This is an allowlist, not a
+// blocklist: sign-in, sign-up, forgot / reset password, verify-email,
+// onboarding, invite acceptance and the legal pages have no data worth
+// caching and nothing to re-fetch, so a bar there would be claiming to
+// check something that does not exist. A blocklist would silently opt every
+// new auth or marketing route INTO the behaviour, which is the wrong
+// default for exactly the pages where it is meaningless.
+const APP_PREFIXES = [
+  "/dashboard",
+  "/ocs",
+  "/levies",
+  "/meetings",
+  "/maintenance",
+  "/contractors",
+  "/inbox",
+  "/trust-accounts",
+  "/chart-of-accounts",
+  "/settings",
+  "/help",
+  "/admin",
+];
+
+/** Carve-outs inside the app: multi-step wizards and long-form editors own
+ *  their state client-side and a refresh under them would throw work away,
+ *  and the admin MFA screens are an auth flow that happens to live under
+ *  /admin. */
+const SKIP_WITHIN_APP = [
+  "/ocs/new",
+  "/admin/blog/",
+  "/admin/mfa-enroll",
+  "/admin/mfa-challenge",
+];
+
+/** Exact segment match, so /settings matches /settings and /settings/foo
+ *  but never /settingsfoo. */
+function underPrefix(pathname: string, prefix: string): boolean {
+  return pathname === prefix || pathname.startsWith(prefix + "/");
+}
+
+export function shouldRevalidate(pathname: string): boolean {
+  if (!APP_PREFIXES.some((p) => underPrefix(pathname, p))) return false;
+  return !SKIP_WITHIN_APP.some((p) => underPrefix(pathname, p) || pathname.startsWith(p));
+}
 
 function StaleWhileRevalidate() {
   const pathname = usePathname();
@@ -168,7 +207,7 @@ function StaleWhileRevalidate() {
   const failsafeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const key = `${pathname}?${searchParams}`;
-  const skip = SKIP_REVALIDATE.some((prefix) => pathname.startsWith(prefix));
+  const skip = !shouldRevalidate(pathname);
 
   const settle = useCallback(() => {
     inFlightRef.current = false;
